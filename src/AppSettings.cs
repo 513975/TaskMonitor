@@ -25,6 +25,11 @@ namespace task_monitor
     /// the conversion is display-side only. null = Celsius.</summary>
     public enum GpuTempUnit { Celsius, Fahrenheit }
 
+    /// <summary>任务栏功耗栏显示来源 (settings.yaml <c>powerTaskbarSource</c>)：
+    /// 电池端功耗（默认）、CPU 封装功耗或系统整机功耗。来源不可用时任务栏显示
+    /// <c>--</c>，不会静默切换到另一种口径。</summary>
+    public enum PowerTaskbarSource { Battery, CpuPackage, System }
+
     public sealed class TaskbarDisplaySelection
     {
         public string Id { get; set; }
@@ -103,7 +108,7 @@ namespace task_monitor
 
         /// <summary>
         /// 任务栏窗口与悬浮窗口的采样项目顺序（设置 → 外观 → 项目顺序）。值为点击槽位
-        /// 0=CPU、1=内存、2=磁盘、3=GPU、4=网络；null = CPU/内存/磁盘/GPU/网络。
+        /// 0=CPU、1=内存、2=磁盘、3=GPU、4=网络、5=功耗；null = CPU/内存/磁盘/GPU/网络/功耗。
         /// 读取时会去除重复、非法项并补齐缺项，关闭采样的项目仍保留在顺序中。
         /// </summary>
         public List<int> ItemOrder { get; set; }
@@ -204,6 +209,14 @@ namespace task_monitor
         public bool? DiskSamplingEnabled { get; set; }
         public bool? GpuSamplingEnabled { get; set; }
         public bool? NetSamplingEnabled { get; set; }
+        public bool? PowerSamplingEnabled { get; set; }
+
+        /// <summary>
+        /// 任务栏功耗栏的默认来源 (设置 → 采样项目 → 功耗)：null = 电池功耗（默认），
+        /// 也可选择 CPU 封装功耗或系统整机功耗。仅改变任务栏栏位的显示来源，不改变
+        /// 功耗详情页的全部数据与曲线。
+        /// </summary>
+        public PowerTaskbarSource? PowerTaskbarSource { get; set; }
 
         /// <summary>
         /// 合并相同程序 (设置 → 采样项目): null = on (the default — same-exe-path rows in

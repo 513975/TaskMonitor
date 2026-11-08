@@ -379,6 +379,7 @@ namespace task_monitor
             _sampling.SetGpuDisplay(GpuDisplayModeIndexOf(_config), _config.GpuDisplayIndex ?? 0);
             _taskbars.SetGpuTempDisplay(_config.GpuTaskbarContent ?? GpuTaskbarContent.Usage,
                 _config.GpuTempIndex ?? -1, _config.GpuTempUnit == GpuTempUnit.Fahrenheit);
+            _taskbars.SetPowerTaskbarSource(_config.PowerTaskbarSource ?? PowerTaskbarSource.Battery);
             _sampling.SetNetAdapter(_config.NetAdapterId);
             _sampling.SetClashApi(_config.ClashEnabled != false, _config.ClashApiAddress, _config.ClashApiSecret);
             _sampling.SetPublicIpLookup(_config.PublicIpEnabled != false);
@@ -749,6 +750,7 @@ namespace task_monitor
                 _config.FloatingOpacity ?? 1.0, OnFloatingOpacityChanged,
                 _config.SampleIntervalMs ?? 1000, OnSampleIntervalChanged,
                 SamplingMaskOf(_config), OnMetricSamplingChanged,
+                PowerTaskbarSourceIndexOf(_config), OnPowerTaskbarSourceChanged,
                 _config.MergeSamePathProcesses != false, OnMergeSamePathChanged,
                 // The 特定磁盘 picker's items come from the latest snapshot's disk list
                 // (empty while disk sampling is off — the picker then keeps only the
@@ -1036,6 +1038,10 @@ namespace task_monitor
         private static int GpuTempUnitIndexOf(AppSettings c)
             => c.GpuTempUnit == GpuTempUnit.Fahrenheit ? 1 : 0;
 
+        private static int PowerTaskbarSourceIndexOf(AppSettings c)
+            => c.PowerTaskbarSource == PowerTaskbarSource.CpuPackage ? 1
+               : c.PowerTaskbarSource == PowerTaskbarSource.System ? 2 : 0;
+
         // 任务栏显示 / 温度来源 / 温度单位 combo changed: persist (the pick ≥0 and the
         // unit are KEPT when the content returns to 使用率, so switching back restores
         // them — same keep rule as GpuDisplayIndex) and push to the taskbar thread.
@@ -1051,6 +1057,18 @@ namespace task_monitor
             _config.GpuTempUnit = fahrenheit ? GpuTempUnit.Fahrenheit : (GpuTempUnit?)null;
             TrySaveConfig();
             _taskbars.SetGpuTempDisplay(content, tempIndex, fahrenheit);
+        }
+
+        // 功耗 → 任务栏显示来源: null = 电池功耗（默认），1 = CPU 封装，2 = 系统整机。
+        // This is a rendering choice only; the power sampler and detail page continue to
+        // publish and display all available sources.
+        private void OnPowerTaskbarSourceChanged(int sourceIndex)
+        {
+            _config.PowerTaskbarSource = sourceIndex == 1 ? PowerTaskbarSource.CpuPackage
+                : sourceIndex == 2 ? PowerTaskbarSource.System
+                : (PowerTaskbarSource?)null;
+            TrySaveConfig();
+            _taskbars.SetPowerTaskbarSource(_config.PowerTaskbarSource ?? PowerTaskbarSource.Battery);
         }
 
         // ---------- 设置 → 采样 → 网络: 适配器 ----------
@@ -1154,6 +1172,7 @@ namespace task_monitor
             if (c.DiskSamplingEnabled != false) mask |= SystemSampler.MaskDisk;
             if (c.GpuSamplingEnabled != false) mask |= SystemSampler.MaskGpu;
             if (c.NetSamplingEnabled != false) mask |= SystemSampler.MaskNet;
+            if (c.PowerSamplingEnabled != false) mask |= SystemSampler.MaskPower;
             return mask == 0 ? SystemSampler.MaskCpu : mask;
         }
 
@@ -1171,6 +1190,7 @@ namespace task_monitor
                 case 2: _config.DiskSamplingEnabled = on ? (bool?)null : false; break;
                 case 3: _config.GpuSamplingEnabled = on ? (bool?)null : false; break;
                 case 4: _config.NetSamplingEnabled = on ? (bool?)null : false; break;
+                case 5: _config.PowerSamplingEnabled = on ? (bool?)null : false; break;
                 default: return;
             }
             TrySaveConfig();

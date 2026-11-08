@@ -51,18 +51,19 @@ namespace task_monitor
         }
 
         // The overlay is a fixed-width-cell grid of up to four two-row groups. Hit slots stay
-        // stable (0=CPU 1=内存 2=磁盘 3=GPU 4=网络); their VISUAL order is _itemOrder, shared
+        // stable (0=CPU 1=内存 2=磁盘 3=GPU 4=网络 5=功耗); their VISUAL order is _itemOrder, shared
         // by the taskbar and floating forms. 网络 and GPU 两者 each own a whole two-row cell;
         // every other metric occupies one row. A sampling-disabled metric leaves no hole, and
         // empty groups shrink away. A two-row item that would start on a horizontal cell's
         // bottom row moves to the next cell, leaving an intentional alignment hole.
         // ComputeLayout derives drawing, hit-testing and popup anchors from the same geometry.
         private const float ITEM_GAP = 0f;                 // groups sit flush against each other
-        private static readonly float[] GroupWidths = { 70f, 70f, 70f, 84f }; // stacked cell ×3, 网络 (DIPs at 96 DPI)
-        private const int GroupCount = 4;                  // up to four two-row cells
-        private const int SlotCount = 5;                   // hit slots: CPU/内存/磁盘/GPU/网络
-        private const int PackedPositionCount = 8;         // five items + GPU's second row + alignment holes
-        private static readonly int[] StandardItemOrder = { 0, 1, 2, 3, 4 };
+        private static readonly float[] GroupWidths = { 70f, 70f, 70f, 84f, 70f }; // 任务栏普通 cell 70 DIP, 网络 cell 84 DIP
+        private const int GroupCount = 5;                  // six metrics can occupy five horizontal cells
+        private const int VerticalMaxColumns = 4;          // preserve the original side-taskbar column limit
+        private const int SlotCount = 6;                   // hit slots: CPU/内存/磁盘/GPU/网络/功耗
+        private const int PackedPositionCount = 10;        // six items + GPU/network second rows + up to two alignment holes
+        private static readonly int[] StandardItemOrder = { 0, 1, 2, 3, 4, 5 };
 
         internal static int[] NormalizeItemOrder(IEnumerable<int> order)
         {
@@ -143,7 +144,7 @@ namespace task_monitor
         // line box without grazing the row boundaries, which is the "仍保持美观" half of
         // the ask; the two-line block keeps ≥1 DIP of derived line slack at 40. The
         // one-line strip's own 16-DIP pitch is ALREADY the compact form — untouched.
-        private static readonly float[] CompactGroupWidths = { 65f, 65f, 65f, 78f };
+        private static readonly float[] CompactGroupWidths = { 65f, 65f, 65f, 78f, 65f };
         private static float GroupW(int g, bool compact) => (compact ? CompactGroupWidths : GroupWidths)[g];
         private static float GridRowH(bool compact) => compact ? 18f : GRID_ROW_H;
         private static float StripBlockH(bool compact) => compact ? 40f : STRIP_BLOCK_H;
@@ -188,10 +189,10 @@ namespace task_monitor
             public bool TwoLine;
             public float Width;
             public float Height;
-            public float Left0, Left1, Left2, Left3;
+            public float Left0, Left1, Left2, Left3, Left4;
             // Every item occupies one row, except 网络 and GPU 两者, whose two positions stay
             // together. Empty positions are cell-alignment holes or the final odd row.
-            public int Pos0, Pos1, Pos2, Pos3, Pos4, Pos5, Pos6, Pos7;
+            public int Pos0, Pos1, Pos2, Pos3, Pos4, Pos5, Pos6, Pos7, Pos8, Pos9;
             public int TempPos;
             public int NetPos;
             public int SlotMask;
@@ -201,19 +202,19 @@ namespace task_monitor
             public int Columns;
             public float RowH;
             public int ColRows0, ColRows1, ColRows2, ColRows3;
-            public int PosCol0, PosCol1, PosCol2, PosCol3, PosCol4, PosCol5, PosCol6, PosCol7;
-            public int PosRow0, PosRow1, PosRow2, PosRow3, PosRow4, PosRow5, PosRow6, PosRow7;
+            public int PosCol0, PosCol1, PosCol2, PosCol3, PosCol4, PosCol5, PosCol6, PosCol7, PosCol8, PosCol9;
+            public int PosRow0, PosRow1, PosRow2, PosRow3, PosRow4, PosRow5, PosRow6, PosRow7, PosRow8, PosRow9;
             public int NetCol, NetRow;
 
             public bool GroupVisible(int g) => GroupLeft(g) >= 0f;
-            public float GroupLeft(int g) => g == 0 ? Left0 : g == 1 ? Left1 : g == 2 ? Left2 : Left3;
+            public float GroupLeft(int g) => g == 0 ? Left0 : g == 1 ? Left1 : g == 2 ? Left2 : g == 3 ? Left3 : Left4;
             public float GroupW(int g) => TaskbarWindow.GroupW(NetPos >= 0 && NetPos / 2 == g ? 3 : 0, Compact);
             public bool SlotVisible(int slot) => (SlotMask & (1 << slot)) != 0;
-            public int SlotAt(int pos) => pos == 0 ? Pos0 : pos == 1 ? Pos1 : pos == 2 ? Pos2 : pos == 3 ? Pos3 : pos == 4 ? Pos4 : pos == 5 ? Pos5 : pos == 6 ? Pos6 : Pos7;
-            public int PositionOf(int slot) => Pos0 == slot ? 0 : Pos1 == slot ? 1 : Pos2 == slot ? 2 : Pos3 == slot ? 3 : Pos4 == slot ? 4 : Pos5 == slot ? 5 : Pos6 == slot ? 6 : Pos7 == slot ? 7 : -1;
+            public int SlotAt(int pos) => pos == 0 ? Pos0 : pos == 1 ? Pos1 : pos == 2 ? Pos2 : pos == 3 ? Pos3 : pos == 4 ? Pos4 : pos == 5 ? Pos5 : pos == 6 ? Pos6 : pos == 7 ? Pos7 : pos == 8 ? Pos8 : Pos9;
+            public int PositionOf(int slot) => Pos0 == slot ? 0 : Pos1 == slot ? 1 : Pos2 == slot ? 2 : Pos3 == slot ? 3 : Pos4 == slot ? 4 : Pos5 == slot ? 5 : Pos6 == slot ? 6 : Pos7 == slot ? 7 : Pos8 == slot ? 8 : Pos9 == slot ? 9 : -1;
             public bool NetVisible => NetPos >= 0;
-            public int PosCol(int pos) => pos == 0 ? PosCol0 : pos == 1 ? PosCol1 : pos == 2 ? PosCol2 : pos == 3 ? PosCol3 : pos == 4 ? PosCol4 : pos == 5 ? PosCol5 : pos == 6 ? PosCol6 : PosCol7;
-            public int PosRow(int pos) => pos == 0 ? PosRow0 : pos == 1 ? PosRow1 : pos == 2 ? PosRow2 : pos == 3 ? PosRow3 : pos == 4 ? PosRow4 : pos == 5 ? PosRow5 : pos == 6 ? PosRow6 : PosRow7;
+            public int PosCol(int pos) => pos == 0 ? PosCol0 : pos == 1 ? PosCol1 : pos == 2 ? PosCol2 : pos == 3 ? PosCol3 : pos == 4 ? PosCol4 : pos == 5 ? PosCol5 : pos == 6 ? PosCol6 : pos == 7 ? PosCol7 : pos == 8 ? PosCol8 : PosCol9;
+            public int PosRow(int pos) => pos == 0 ? PosRow0 : pos == 1 ? PosRow1 : pos == 2 ? PosRow2 : pos == 3 ? PosRow3 : pos == 4 ? PosRow4 : pos == 5 ? PosRow5 : pos == 6 ? PosRow6 : pos == 7 ? PosRow7 : pos == 8 ? PosRow8 : PosRow9;
             public int ColRows(int c) => c == 0 ? ColRows0 : c == 1 ? ColRows1 : c == 2 ? ColRows2 : ColRows3;
             public float ColumnLeft(int c)
             {
@@ -233,7 +234,9 @@ namespace task_monitor
                 else if (pos == 4) { PosCol4 = col; PosRow4 = row; }
                 else if (pos == 5) { PosCol5 = col; PosRow5 = row; }
                 else if (pos == 6) { PosCol6 = col; PosRow6 = row; }
-                else { PosCol7 = col; PosRow7 = row; }
+                else if (pos == 7) { PosCol7 = col; PosRow7 = row; }
+                else if (pos == 8) { PosCol8 = col; PosRow8 = row; }
+                else { PosCol9 = col; PosRow9 = row; }
             }
             public void AddColRows(int col, int rows)
             {
@@ -311,10 +314,10 @@ namespace task_monitor
             if (itemOrder == null || itemOrder.Length != SlotCount) itemOrder = StandardItemOrder;
             var l = new OverlayLayout
             {
-                Left0 = -1f, Left1 = -1f, Left2 = -1f, Left3 = -1f,
-                Pos0 = -1, Pos1 = -1, Pos2 = -1, Pos3 = -1, Pos4 = -1, Pos5 = -1, Pos6 = -1, Pos7 = -1,
-                PosCol0 = -1, PosCol1 = -1, PosCol2 = -1, PosCol3 = -1, PosCol4 = -1, PosCol5 = -1, PosCol6 = -1, PosCol7 = -1,
-                PosRow0 = -1, PosRow1 = -1, PosRow2 = -1, PosRow3 = -1, PosRow4 = -1, PosRow5 = -1, PosRow6 = -1, PosRow7 = -1,
+                Left0 = -1f, Left1 = -1f, Left2 = -1f, Left3 = -1f, Left4 = -1f,
+                Pos0 = -1, Pos1 = -1, Pos2 = -1, Pos3 = -1, Pos4 = -1, Pos5 = -1, Pos6 = -1, Pos7 = -1, Pos8 = -1, Pos9 = -1,
+                PosCol0 = -1, PosCol1 = -1, PosCol2 = -1, PosCol3 = -1, PosCol4 = -1, PosCol5 = -1, PosCol6 = -1, PosCol7 = -1, PosCol8 = -1, PosCol9 = -1,
+                PosRow0 = -1, PosRow1 = -1, PosRow2 = -1, PosRow3 = -1, PosRow4 = -1, PosRow5 = -1, PosRow6 = -1, PosRow7 = -1, PosRow8 = -1, PosRow9 = -1,
                 NetCol = -1,
                 TempPos = -1,
                 NetPos = -1,
@@ -327,7 +330,8 @@ namespace task_monitor
                 if (position == 0) l.Pos0 = slot; else if (position == 1) l.Pos1 = slot;
                 else if (position == 2) l.Pos2 = slot; else if (position == 3) l.Pos3 = slot;
                 else if (position == 4) l.Pos4 = slot; else if (position == 5) l.Pos5 = slot;
-                else if (position == 6) l.Pos6 = slot; else l.Pos7 = slot;
+                else if (position == 6) l.Pos6 = slot; else if (position == 7) l.Pos7 = slot;
+                else if (position == 8) l.Pos8 = slot; else l.Pos9 = slot;
             }
             int pos = 0;
             for (int i = 0; i < SlotCount; i++)
@@ -358,7 +362,7 @@ namespace task_monitor
             {
                 if (g > 0) x += ITEM_GAP;
                 float left = x;
-                if (g == 0) l.Left0 = left; else if (g == 1) l.Left1 = left; else if (g == 2) l.Left2 = left; else l.Left3 = left;
+                if (g == 0) l.Left0 = left; else if (g == 1) l.Left1 = left; else if (g == 2) l.Left2 = left; else if (g == 3) l.Left3 = left; else l.Left4 = left;
                 x += l.GroupW(g);
             }
             l.Width = x;
@@ -376,7 +380,7 @@ namespace task_monitor
             float avail = availableWidthDip > 0f ? availableWidthDip : natural;
             int items = packed - (net ? 1 : 0);
             int maxCols = (int)((avail - (net ? w3 - w0 : 0f)) / w0 + LAYOUT_FIT_EPSILON);
-            maxCols = Math.Min(Math.Min(Math.Max(maxCols, 1), items), GroupCount);
+            maxCols = Math.Min(Math.Min(Math.Max(maxCols, 1), items), VerticalMaxColumns);
 
             if (maxCols == 1)
             {
@@ -506,7 +510,7 @@ namespace task_monitor
 
         /// <summary>
         /// Invoked on the taskbar thread whenever a hit slot is clicked. The argument
-        /// is the new selected slot (0–4: CPU/内存/磁盘/GPU/网络), or -1 when the selection
+        /// is the new selected slot (0–5: CPU/内存/磁盘/GPU/网络/功耗), or -1 when the selection
         /// was toggled off. The owner (App) marshals this onto the WPF UI thread to show/hide
         /// the detail popup. Set by App before <see cref="Start"/> runs.
         /// </summary>
@@ -678,6 +682,7 @@ namespace task_monitor
 
         private volatile GpuTaskbarContent _gpuTaskbarContent = GpuTaskbarContent.Usage;
         private volatile bool _gpuTempFahrenheit;
+        private volatile PowerTaskbarSource _powerTaskbarSource = PowerTaskbarSource.Battery;
 
         public void SetGpuTempDisplay(GpuTaskbarContent content, int tempIndex, bool fahrenheit)
         {
@@ -691,6 +696,14 @@ namespace task_monitor
             _gpuTempFahrenheit = fahrenheit;
             if (OverlayHwnd != IntPtr.Zero)
                 WindowInterop.PostMessageW(OverlayHwnd, WindowInterop.WM_APP_SET_METRICS, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        /// <summary>设置 → 采样项目 → 功耗：任务栏功耗栏只切换显示来源；详情页仍保留全部数据。</summary>
+        public void SetPowerTaskbarSource(PowerTaskbarSource source)
+        {
+            _powerTaskbarSource = source;
+            if (OverlayHwnd != IntPtr.Zero)
+                WindowInterop.PostMessageW(OverlayHwnd, WindowInterop.WM_APP_SNAPSHOT, IntPtr.Zero, IntPtr.Zero);
         }
 
         public void SetNetAdapter(string id) => _sampling.SetNetAdapter(id);
@@ -936,7 +949,7 @@ namespace task_monitor
         }
 
         /// <summary>
-        /// Bitmask of hit slots (bit 0–4) whose left-click press is suppressed — set while
+        /// Bitmask of hit slots (bit 0–5) whose left-click press is suppressed — set while
         /// that slot's window is pinned (the pinned window owns it until unpinned or closed).
         /// Hover is unaffected. Single writer (the WPF UI thread), read on the taskbar thread
         /// in WndProc.
@@ -1716,6 +1729,8 @@ namespace task_monitor
                 ctx.DrawText("↓", s.LabelFormat, netDown, s.LabelBrush);
                 ctx.DrawText(NetRateFormatter.Format(s.Snapshot.NetDownBytesPerSec), s.NetFormat, netDown, s.TextBrush);
             }
+            DrawSlotRow(ctx, s, layout, top, mid, bottom, 5,
+                "功耗", PowerTaskbarText(s.Snapshot.Power, s.Owner._powerTaskbarSource));
 
             // 悬浮模式: the card's own 1px outline, drawn LAST so the fills above cannot cover it —
             // they run edge-to-edge here (pad = 0), which is exactly what would eat it. This is
@@ -1860,6 +1875,8 @@ namespace task_monitor
                     ctx.DrawText("↓", s.LabelFormat, netDown, s.LabelBrush);
                     ctx.DrawText(NetRateFormatter.Format(s.Snapshot.NetDownBytesPerSec), s.NetFormat, netDown, s.TextBrush);
                 }
+                DrawSlotRow(ctx, s, layout, 0f, 0f, 0f, 5,
+                    "功耗", PowerTaskbarText(s.Snapshot.Power, s.Owner._powerTaskbarSource));
                 return;
             }
 
@@ -1873,6 +1890,8 @@ namespace task_monitor
                 DrawStripPosBlock(ctx, s, layout, layout.TempPos, "GPU", gpuTempBlockText);
             else
                 DrawStripBlock(ctx, s, layout, 3, "GPU", gpuUsageBlockText);
+            DrawStripBlock(ctx, s, layout, 5,
+                "功耗", PowerTaskbarText(s.Snapshot.Power, s.Owner._powerTaskbarSource));
                 if (TrySlotRect(layout, 0f, 0f, 0f, 4, out var netBlock))
                 {
                     // BOTH modes draw the whole ↑/↓ pair as one four-line cluster
@@ -2055,6 +2074,33 @@ namespace task_monitor
             tempValue = GpuTempText.Format(
                 s.Snapshot.GpuTempValid ? s.Snapshot.GpuTempCelsius : double.NaN,
                 s.Owner._gpuTempFahrenheit);
+        }
+
+        private static string PowerTaskbarText(PowerSnapshot power, PowerTaskbarSource source)
+        {
+            if (power == null) return "--";
+            switch (source)
+            {
+                case PowerTaskbarSource.CpuPackage:
+                    if (power.CpuPackageWatts is double cpuPackageWatts)
+                        return $"{(power.CpuPackageKind == PowerValueKind.Estimated ? "~" : "")}{cpuPackageWatts:F1}W";
+                    break;
+                case PowerTaskbarSource.System:
+                    if (power.SystemWatts is double systemWatts)
+                        return $"{(power.SystemKind == PowerValueKind.Estimated ? "~" : "")}{systemWatts:F1}W";
+                    break;
+                default:
+                    if (power.BatteryPowerWatts is double batteryWatts)
+                    {
+                        string sign = power.BatteryState == BatteryFlowState.Charging ? "+" :
+                                      power.BatteryState == BatteryFlowState.Discharging ? "-" : "";
+                        return $"{sign}{batteryWatts:F1}W";
+                    }
+                    if (power.BatteryState == BatteryFlowState.Idle)
+                        return "0.0W";
+                    break;
+            }
+            return "--";
         }
 
         // Apply the controller's latest publication on this HWND's own thread. Sampling

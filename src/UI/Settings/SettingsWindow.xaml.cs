@@ -57,7 +57,8 @@ namespace task_monitor
         private readonly Action<bool> _floatingFullscreenHideChanged; // 悬浮模式 → 全屏时隐藏
         private readonly Action<double> _floatingOpacityChanged; // 悬浮模式 → 透明度 (0.2–1.0)
         private readonly Action<int> _intervalChanged;        // ms: 500 / 1000 / 2000
-        private readonly Action<int, bool> _samplingChanged;  // (overlay hit slot 0–4, enabled)
+        private readonly Action<int, bool> _samplingChanged;  // (overlay hit slot 0–5, enabled)
+        private readonly Action<int> _powerTaskbarSourceChanged; // 0=电池 1=CPU封装 2=系统整机
         private readonly Action<bool> _mergeSamePathChanged;  // 合并相同程序
         private readonly Action<int, int> _diskDisplayChanged; // (mode 0=平均 1=最高 2=特定, PhysicalDrive index)
         private readonly Action<int, int> _gpuDisplayChanged;  // (mode 0=平均 1=最高 2=特定, "GPU N" number)
@@ -126,6 +127,8 @@ namespace task_monitor
         /// <param name="samplingMask">Current per-metric sampling mask (SystemSampler.Mask*
         /// bits, in overlay hit-slot order).</param>
         /// <param name="samplingChanged">Reported with (slot, enabled) on every 采样 toggle.</param>
+        /// <param name="powerTaskbarSourceIndex">任务栏功耗来源：0=电池（默认）、1=CPU 封装、2=系统整机。</param>
+        /// <param name="powerTaskbarSourceChanged">Reported on each taskbar power-source selection.</param>
         /// <param name="mergeSamePath">Current 合并相同程序 state (yaml null = the on default).</param>
         /// <param name="diskDisplayIndex">Current 磁盘显示方式 combo index: 0=所有磁盘平均
         /// (yaml null) 1=最高利用率 2=特定磁盘.</param>
@@ -196,6 +199,7 @@ namespace task_monitor
             double floatingOpacity, Action<double> floatingOpacityChanged,
             int intervalMs, Action<int> intervalChanged,
             int samplingMask, Action<int, bool> samplingChanged,
+            int powerTaskbarSourceIndex, Action<int> powerTaskbarSourceChanged,
             bool mergeSamePath, Action<bool> mergeSamePathChanged,
             int diskDisplayIndex, int pickedDiskIndex, IReadOnlyList<DiskInfo> disks,
             Action<int, int> diskDisplayChanged,
@@ -229,6 +233,7 @@ namespace task_monitor
             _floatingOpacityChanged = floatingOpacityChanged;
             _intervalChanged = intervalChanged;
             _samplingChanged = samplingChanged;
+            _powerTaskbarSourceChanged = powerTaskbarSourceChanged;
             _mergeSamePathChanged = mergeSamePathChanged;
             _diskDisplayChanged = diskDisplayChanged;
             _gpuDisplayChanged = gpuDisplayChanged;
@@ -299,6 +304,9 @@ namespace task_monitor
             DiskSwitch.IsOn = (samplingMask & SystemSampler.MaskDisk) != 0;
             GpuSwitch.IsOn = (samplingMask & SystemSampler.MaskGpu) != 0;
             NetSwitch.IsOn = (samplingMask & SystemSampler.MaskNet) != 0;
+            PowerSwitch.IsOn = (samplingMask & SystemSampler.MaskPower) != 0;
+            PowerSourceCombo.SelectedIndex = powerTaskbarSourceIndex < 0 || powerTaskbarSourceIndex > 2
+                ? 0 : powerTaskbarSourceIndex;
             MergeSwitch.IsOn = mergeSamePath;
             DiskDisplayCombo.SelectedIndex = diskDisplayIndex < 0 || diskDisplayIndex > 2 ? 0 : diskDisplayIndex;
             PopulateDiskPicker(disks, pickedDiskIndex);
@@ -364,6 +372,7 @@ namespace task_monitor
                 case 2: return "磁盘";
                 case 3: return "GPU";
                 case 4: return "网络";
+                case 5: return "功耗";
                 default: return string.Empty;
             }
         }
@@ -866,8 +875,8 @@ namespace task_monitor
             _updateSourceChanged?.Invoke(UpdateSourceCombo.SelectedIndex);
         }
 
-        // One handler for all five 采样 toggles — the switch's Tag carries the overlay
-        // hit slot (0=CPU 1=内存 2=磁盘 3=GPU 4=网络). The last enabled metric cannot
+        // One handler for all six 采样 toggles — the switch's Tag carries the overlay
+        // hit slot (0=CPU 1=内存 2=磁盘 3=GPU 4=网络 5=功耗). The last enabled metric cannot
         // be turned off; restore it without re-firing this handler.
         private void MetricSwitch_Toggled(object sender, RoutedEventArgs e)
         {
@@ -875,7 +884,7 @@ namespace task_monitor
             if (sender is ToggleSwitch sw && int.TryParse(sw.Tag as string, out int slot))
             {
                 if (!sw.IsOn && !CpuSwitch.IsOn && !RamSwitch.IsOn && !DiskSwitch.IsOn
-                    && !GpuSwitch.IsOn && !NetSwitch.IsOn)
+                    && !GpuSwitch.IsOn && !NetSwitch.IsOn && !PowerSwitch.IsOn)
                 {
                     _loaded = false;
                     sw.IsOn = true;
@@ -890,6 +899,14 @@ namespace task_monitor
         {
             if (!_loaded) return;
             _mergeSamePathChanged?.Invoke(MergeSwitch.IsOn);
+        }
+
+        // 功耗 → 任务栏显示来源: 0=电池（默认） 1=CPU 封装 2=系统整机。
+        private void PowerSourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!_loaded) return;
+            _powerTaskbarSourceChanged?.Invoke(
+                PowerSourceCombo.SelectedIndex < 0 ? 0 : PowerSourceCombo.SelectedIndex);
         }
 
         // 磁盘 → 显示方式 combo: 0=所有磁盘平均 1=最高利用率 2=特定磁盘 (the picker below

@@ -1,0 +1,230 @@
+<UserControl x:Class="task_monitor.PowerDetailView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ikw="http://schemas.inkore.net/lib/ui/wpf"
+             xmlns:ui="http://schemas.inkore.net/lib/ui/wpf/modern"
+             xmlns:local="clr-namespace:task_monitor"
+             Background="Transparent">
+
+    <ikw:SimpleStackPanel Spacing="12">
+
+        <Grid Margin="0,2,0,4">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <ui:FontIcon FontSize="24" VerticalAlignment="Center" Margin="0,0,8,0"
+                             Icon="{x:Static ui:FluentSystemIcons.Gauge_20_Regular}" />
+                <TextBlock Text="功耗" FontSize="22" VerticalAlignment="Center" />
+                <ContentControl x:Name="PinSlotHost" VerticalAlignment="Center"
+                                Margin="4,0,0,0" />
+            </StackPanel>
+            <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center">
+                <TextBlock x:Name="SystemHeaderText" FontSize="22"
+                           HorizontalAlignment="Right" />
+                <TextBlock x:Name="SystemHeaderLabelText" FontSize="9"
+                           HorizontalAlignment="Right"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Margin="0,-2,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" FontSize="12">
+                <Run Text="CPU 封装：" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Run x:Name="CpuPackageValueRun" Text="—" />
+            </TextBlock>
+            <TextBlock Grid.Column="1" FontSize="12">
+                <Run Text="电池状态：" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Run x:Name="BatteryStatusRun" Text="—" />
+            </TextBlock>
+            <TextBlock Grid.Column="2" FontSize="12" TextTrimming="CharacterEllipsis"
+                       ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}">
+                <Run Text="来源：" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Run x:Name="SystemSourceRun" Text="—" />
+            </TextBlock>
+        </Grid>
+
+        <Border Background="Transparent" BorderThickness="0" Padding="0,4" Height="138">
+            <local:PowerHistoryChart x:Name="PowerChart" Background="Transparent" />
+        </Border>
+
+        <Grid Margin="0,-8,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.2*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                <Ellipse x:Name="SystemLegendDot" Width="7" Height="7" Margin="0,0,6,0" />
+                <TextBlock x:Name="SystemLegendText" Text="整机功率" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Ellipse x:Name="CpuLegendDot" Width="7" Height="7" Margin="0,0,6,0" />
+                <TextBlock Text="CPU 封装" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+            <StackPanel x:Name="BatteryLegendPanel" Grid.Column="2"
+                        Orientation="Horizontal" VerticalAlignment="Center">
+                <Ellipse x:Name="BatteryLegendDot" Width="7" Height="7" Margin="0,0,6,0" />
+                <TextBlock x:Name="BatteryLegendText" Text="电池放电" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                <Ellipse x:Name="BatteryChargeLegendDot" Width="7" Height="7" Margin="0,0,6,0" />
+                <TextBlock Text="电池充电" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+        </Grid>
+
+        <Border x:Name="PowerUnavailableNotice" Background="Transparent" BorderThickness="0"
+                Padding="0,18,0,4" Visibility="Collapsed">
+            <TextBlock x:Name="PowerUnavailableText"
+                       Text="当前设备未提供可用的功耗传感器读数"
+                       FontSize="12" TextWrapping="Wrap" HorizontalAlignment="Center"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Border>
+
+        <Grid Margin="0,0,0,2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="平均功率" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="SystemAverageText" Text="—" FontSize="13" />
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+                <TextBlock Text="峰值功率" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="SystemPeakText" Text="—" FontSize="13" />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+                <TextBlock x:Name="SystemEnergyLabelText" Text="累计耗能" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="EnergyText" Text="—" FontSize="13" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Margin="0,-2,0,2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock x:Name="BatteryAverageLabelText" Text="电池平均" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="BatteryAverageText" Text="—" FontSize="13" />
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+                <TextBlock x:Name="BatteryPeakLabelText" Text="电池峰值" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="BatteryPeakText" Text="—" FontSize="13" />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+                <TextBlock x:Name="BatteryEnergyLabelText" Text="电池累计" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="BatteryEnergyText" Text="—" FontSize="13" />
+            </StackPanel>
+        </Grid>
+
+        <Border Background="Transparent" BorderThickness="0" Padding="0,4">
+            <ikw:SimpleStackPanel Spacing="7">
+                <Grid>
+                    <TextBlock Text="组件功耗" FontSize="12"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="读数" FontSize="12"
+                               HorizontalAlignment="Right"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </Grid>
+                <TextBlock x:Name="NoComponentsNotice" Text="未检测到组件功耗传感器"
+                           FontSize="11" Visibility="Collapsed"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <ItemsControl x:Name="ComponentList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="72" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding Name}"
+                                           FontSize="12" TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding Source}" />
+                                <TextBlock Grid.Column="1" Text="{Binding WattsText}"
+                                           FontSize="12" TextAlignment="Right" />
+                                <TextBlock Grid.Column="2" Text="{Binding StatusText}"
+                                           FontSize="10" Margin="8,0,0,0"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ikw:SimpleStackPanel>
+        </Border>
+
+        <Border Background="Transparent" BorderThickness="0" Padding="0,4">
+            <ikw:SimpleStackPanel Spacing="6">
+                <Grid>
+                    <TextBlock Text="耗电应用排行" FontSize="12"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="估算功率" FontSize="12"
+                               HorizontalAlignment="Right"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </Grid>
+                <TextBlock x:Name="NoProcessesNotice" Text="暂无可用的应用能耗归因数据"
+                           FontSize="11" Visibility="Collapsed"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <local:TouchDragScrollViewer VerticalScrollBarVisibility="Auto" Height="192"
+                                             Style="{DynamicResource {x:Type ScrollViewer}}"
+                                             IsEnableSmoothManipulating="False" PanningMode="None"
+                                             local:ScrollCacheDuringTouch.Enabled="True">
+                    <local:TouchDragScrollViewer.Physics>
+                        <local:SnappyScrollPhysics />
+                    </local:TouchDragScrollViewer.Physics>
+                    <ItemsControl x:Name="ProcessList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="80" />
+                                    </Grid.ColumnDefinitions>
+                                    <Image Grid.Column="0" Source="{Binding Icon}"
+                                           Width="16" Height="16" VerticalAlignment="Center"
+                                           Margin="0,0,8,0"
+                                           RenderOptions.BitmapScalingMode="HighQuality"
+                                           SnapsToDevicePixels="True" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Name}"
+                                               FontSize="12" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="2" Text="{Binding WattsText}"
+                                               FontSize="12" VerticalAlignment="Center"
+                                               TextAlignment="Right" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </local:TouchDragScrollViewer>
+            </ikw:SimpleStackPanel>
+        </Border>
+
+        <Popup x:Name="HistoryTip" PlacementTarget="{Binding ElementName=PowerChart}"
+               Placement="Relative" StaysOpen="True" AllowsTransparency="True">
+            <Border x:Name="HistoryTipBorder"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="8,4">
+                <TextBlock x:Name="HistoryTipText" FontSize="12"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            </Border>
+        </Popup>
+    </ikw:SimpleStackPanel>
+</UserControl>

@@ -23,6 +23,7 @@ namespace task_monitor
         public uint CpuMhz;                  // base frequency from registry
         public uint CpuCurrentMhz;           // live clock (averaged), for the CPU footer
         public uint NumLogicalProcessors;
+        public PowerSnapshot Power = PowerSnapshot.Empty;
 
         // System summary (CPU detail footer)
         public int ProcessCount;
@@ -130,6 +131,7 @@ namespace task_monitor
         // Per-GPU utilization / temperature / VRAM (DXCore QueryState deltas, Task Manager
         // style) — utilization is the MAX across each adapter's engines.
         private readonly GpuSampler _gpu = new GpuSampler();
+        private readonly PowerSampler _power = new PowerSampler();
         // Per-process GPU utilization (PDH \GPU Engine(*)\Utilization Percentage, Task
         // Manager's Processes-page GPU column) — DXCore has no per-process engine data,
         // which is why this is a PDH sampler, separate from the adapter-level DXCore one.
@@ -142,7 +144,7 @@ namespace task_monitor
         private readonly ServiceHostMap _serviceHosts = new ServiceHostMap();
 
         // ---- per-metric sampling switches (设置 → 采样) ----
-        // One bit per metric, in overlay hit-slot order (CPU/内存/磁盘/GPU/网络 — the same
+        // One bit per metric, in overlay hit-slot order (CPU/内存/磁盘/GPU/网络/功耗 — the same
         // order TaskbarWindow uses, so its mask maps 1:1). A cleared bit skips that metric's
         // samplers entirely: the snapshot keeps its field-initializer defaults and the
         // overlay HIDES the slot (TaskbarWindow.ComputeLayout reflows the remaining slots).
@@ -151,7 +153,8 @@ namespace task_monitor
         public const int MaskDisk = 1 << 2;
         public const int MaskGpu = 1 << 3;
         public const int MaskNet = 1 << 4;
-        public const int MaskAll = MaskCpu | MaskRam | MaskDisk | MaskGpu | MaskNet;
+        public const int MaskPower = 1 << 5;
+        public const int MaskAll = MaskCpu | MaskRam | MaskDisk | MaskGpu | MaskNet | MaskPower;
 
         // Written by the WPF UI thread (settings toggles, via TaskbarWindow.SetMetricSamplingMask),
         // read on the taskbar thread each tick — same single-writer volatile contract as
@@ -164,7 +167,11 @@ namespace task_monitor
         /// <summary>Thread-safe: replace the per-metric sampling mask (<see cref="MaskCpu"/>
         /// …). Applied on the next tick and re-applied whenever SamplingController
         /// has to reconstruct the sampler after a failure.</summary>
-        public void SetEnabledMask(int mask) => _enabledMask = mask;
+        public void SetEnabledMask(int mask)
+        {
+            _enabledMask = mask;
+            _power.SetEnabled((mask & MaskPower) != 0);
+        }
 
         // 设置 → 采样项目 → 合并相同程序 — same volatile single-writer contract as
         // _enabledMask (written via TaskbarWindow.SetMergeSamePathProcesses). Read each
@@ -278,8 +285,9 @@ namespace task_monitor
             bool released = _procNet.Shutdown();
             bool netStopped = _netInfo.Shutdown();
             bool clashStopped = _clash.Shutdown();
+            bool powerStopped = _power.Shutdown();
             _gpu.Shutdown();
-            return released && netStopped && clashStopped;
+            return released && netStopped && clashStopped && powerStopped;
         }
 
         // ---------- slow-step diagnostics (the reported 「卡死几秒后自己恢复」) ----------
@@ -321,6 +329,7 @@ namespace task_monitor
             bool diskOn = (mask & MaskDisk) != 0;
             bool gpuOn = (mask & MaskGpu) != 0;
             bool netOn = (mask & MaskNet) != 0;
+            bool powerOn = (mask & MaskPower) != 0;
 
             // A metric that was JUST re-enabled this tick has stale delta baselines (its
             // samplers weren't called while off — a first Sample now would average the
@@ -332,6 +341,7 @@ namespace task_monitor
             bool diskPrime = diskOn && (prev & MaskDisk) == 0;
             bool gpuPrime = gpuOn && (prev & MaskGpu) == 0;
             bool netPrime = netOn && (prev & MaskNet) == 0;
+            bool powerPrime = powerOn && (prev & MaskPower) == 0;
 
             // svchost → 服务 naming: refresh the PID→services map once per tick (one
             // EnumServicesStatusExW RPC — same one-call-per-tick budget as the process
@@ -346,9 +356,12 @@ namespace task_monitor
 
             var snapshot = new SystemSnapshot { NetInfo = NetInfo.Empty };
 
+            CpuSample cpu = default;
+            if (cpuOn || powerOn)
+                cpu = Timed("CPU(PDH)", () => _cpu.Sample());
+
             if (cpuOn)
             {
-                var cpu = Timed("CPU(PDH)", () => _cpu.Sample());
                 var summary = Timed("系统摘要(注册表/NTQSI)", () => _summary.Sample());
                 if (!cpuPrime)
                 {
@@ -366,6 +379,22 @@ namespace task_monitor
                     snapshot.HandleCount = proc.HandleCount;
                     snapshot.UptimeMs = summary.UptimeMs;
                     snapshot.TopProcesses = proc.TopProcesses;
+                }
+            }
+
+            // Power sampling is kept on the controller thread only for publication and
+            // process attribution; the hardware counter reads happen in the sensor poller.
+            if (powerOn)
+            {
+                if (powerPrime)
+                    _power.ResetEnergyBaseline();
+
+                var power = Timed("功耗(硬件传感器/进程估算)", () => _power.Sample(
+                    cpu.PerCoreUsage ?? Array.Empty<double>(),
+                    proc.TopProcesses));
+                if (!powerPrime)
+                {
+                    snapshot.Power = power;
                 }
             }
 

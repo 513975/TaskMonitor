@@ -31,8 +31,29 @@
 
         <!-- Per-core bars -->
         <Border x:Name="PerCoreCard"
-                Background="Transparent" BorderThickness="0" Padding="0,4" Height="80">
-            <local:CpuCoresChart x:Name="CpuCoresChart" Background="Transparent" />
+                Background="Transparent" BorderThickness="0" Padding="0,4" Height="104">
+            <Grid>
+                <TextBlock Text="每核心功耗（W，~ 表示估算）" FontSize="10"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           VerticalAlignment="Top" />
+                <local:CpuCoresChart x:Name="CpuCoresChart" Background="Transparent"
+                                     Height="66" Margin="0,14,0,0"
+                                     VerticalAlignment="Top" />
+                <ItemsControl x:Name="CorePowerLabels" VerticalAlignment="Bottom" Height="22">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Rows="1" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" FontSize="9" TextAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       TextTrimming="CharacterEllipsis" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
         </Border>
 
         <!-- System summary: speed / processes / threads / handles / uptime (three per row) -->

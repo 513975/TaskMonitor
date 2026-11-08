@@ -337,12 +337,12 @@
                         <!-- One card per metric; the toggle enables/disables that metric's
                              sampling entirely (off = the metric is hidden from the taskbar
                              overlay, the later metrics shift forward to fill its slot).
-                             Tag = the overlay hit slot (0-4), read by the shared
+                             Tag = the overlay hit slot (0-5), read by the shared
                              MetricSwitch_Toggled handler. Metrics with sub-settings
                              (磁盘/GPU/网络) are SettingsExpander; CPU/内存 have none, so a
                              plain card. -->
 
-                        <!-- Section-wide option for the five detail views' process lists — first
+                        <!-- Section-wide option for the six detail views' process lists — first
                              in the section (not a per-metric switch, so a plain card). -->
                         <ui:SettingsCard Header="合并相同程序"
                                          Description="在进程列表中合并相同程序所创建的进程。"
@@ -485,6 +485,24 @@
                                                        TextWrapping="Wrap" />
                                         </StackPanel>
                                     </StackPanel>
+                                </ui:SettingsCard>
+                            </ui:SettingsExpander.Items>
+                        </ui:SettingsExpander>
+
+                        <ui:SettingsExpander Header="功耗" IsExpanded="True" Margin="0,0,0,4">
+                            <ui:SettingsExpander.HeaderIcon>
+                                <ui:FontIcon Icon="{x:Static ui:FluentSystemIcons.BatterySaver_20_Regular}" />
+                            </ui:SettingsExpander.HeaderIcon>
+                            <ui:ToggleSwitch x:Name="PowerSwitch" Tag="5" Toggled="MetricSwitch_Toggled" />
+                            <ui:SettingsExpander.Items>
+                                <ui:SettingsCard Header="任务栏显示来源"
+                                                 Description="选择任务栏功耗栏显示的功耗口径；来源不可用时显示 --。">
+                                    <ComboBox x:Name="PowerSourceCombo" MinWidth="180"
+                                              SelectionChanged="PowerSourceCombo_SelectionChanged">
+                                        <ComboBoxItem Content="电池功耗（默认）" />
+                                        <ComboBoxItem Content="CPU 封装功耗" />
+                                        <ComboBoxItem Content="系统整机功耗" />
+                                    </ComboBox>
                                 </ui:SettingsCard>
                             </ui:SettingsExpander.Items>
                         </ui:SettingsExpander>

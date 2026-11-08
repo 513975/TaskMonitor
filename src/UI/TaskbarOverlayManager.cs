@@ -44,6 +44,7 @@ namespace task_monitor
         private int _clickDisabledMask;
         private GpuTaskbarContent _gpuContent = GpuTaskbarContent.Usage;
         private bool _gpuTempFahrenheit;
+        private PowerTaskbarSource _powerTaskbarSource = PowerTaskbarSource.Battery;
         private bool _floatingTopmost = true;
         private bool _floatingAllowOutOfBounds;
         private bool _floatingDark;
@@ -269,6 +270,12 @@ namespace task_monitor
             foreach (var window in _windows) window.SetOverlayGpuTempDisplay(content, fahrenheit);
         }
 
+        public void SetPowerTaskbarSource(PowerTaskbarSource source)
+        {
+            _powerTaskbarSource = source;
+            foreach (var window in _windows) window.SetPowerTaskbarSource(source);
+        }
+
         public void SetMergeSamePathProcesses(bool on) => _sampling.SetMergeByPath(on);
         public void SetDiskDisplay(int mode, int index) => _sampling.SetDiskDisplay(mode, index);
         public void SetGpuDisplay(int mode, int index) => _sampling.SetGpuDisplay(mode, index);
@@ -278,7 +285,7 @@ namespace task_monitor
 
         public void SetColumnClickEnabled(int slot, bool enabled)
         {
-            if (slot < 0 || slot >= 5) return;
+            if (slot < 0 || slot >= 6) return;
             int bit = 1 << slot;
             _clickDisabledMask = enabled ? _clickDisabledMask & ~bit : _clickDisabledMask | bit;
             foreach (var window in _windows) window.SetColumnClickEnabled(slot, enabled);
@@ -493,7 +500,8 @@ namespace task_monitor
             window.SetSampleInterval(_sampleIntervalMs);
             window.SetOverlayMetricSamplingMask(_samplingMask);
             window.SetOverlayGpuTempDisplay(_gpuContent, _gpuTempFahrenheit);
-            for (int slot = 0; slot < 5; slot++)
+            window.SetPowerTaskbarSource(_powerTaskbarSource);
+            for (int slot = 0; slot < 6; slot++)
                 window.SetColumnClickEnabled(slot, (_clickDisabledMask & (1 << slot)) == 0);
             window.SetFloatingMode(entry.Floating, _floatingX, _floatingY);
             window.SetFloatingTopmost(_floatingTopmost);

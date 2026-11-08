@@ -200,6 +200,7 @@ namespace task_monitor
                     new DiskDetailView(_dark),
                     new GpuDetailView(_dark),
                     new NetDetailView(_dark),
+                    new PowerDetailView(_dark),
                 })
                 {
                     ContentHost.Content = view;
@@ -263,7 +264,8 @@ namespace task_monitor
                 1 => new RamDetailView(_dark),
                 2 => new DiskDetailView(_dark),
                 3 => new GpuDetailView(_dark),
-                _ => new NetDetailView(_dark),    // 4
+                4 => new NetDetailView(_dark),
+                _ => new PowerDetailView(_dark),   // 5
             };
             // Network panel just opened: ask the sampler to refresh Wi-Fi details on its
             // background thread (only if the cache is stale — a hit reuses it with zero wlanapi).
@@ -464,7 +466,7 @@ namespace task_monitor
         }
 
         // ---------- Pinned mode ----------
-        /// <summary>The hit slot this window shows (0–4: CPU/内存/磁盘/GPU/网络), as passed to <see cref="ShowColumn"/>.</summary>
+        /// <summary>The hit slot this window shows (0–5: CPU/内存/磁盘/GPU/网络/功耗), as passed to <see cref="ShowColumn"/>.</summary>
         public int Column => _column;
 
         /// <summary>True while pinned: focus loss no longer closes the window.</summary>
@@ -505,7 +507,7 @@ namespace task_monitor
                 Top = _prePinTop;
                 ClampToWorkArea(-bandDelta);
             }
-            Title = pinned ? (_column switch { 0 => "CPU", 1 => "内存", 2 => "磁盘", 3 => "GPU", _ => "网络" }) : "Detail";
+            Title = pinned ? (_column switch { 0 => "CPU", 1 => "内存", 2 => "磁盘", 3 => "GPU", 4 => "网络", _ => "功耗" }) : "Detail";
             // Keep the overlay's pressed/selected highlight in step with the form:
             // pinned → the column is press-disabled, so it must not look pressed;
             // unpinned → the flyout is open again, so its column is selected (restores
