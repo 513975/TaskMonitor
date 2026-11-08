@@ -11,7 +11,7 @@ This file provides guidance to AI coding agents when working with code in this r
 | taskbar geometry, boot/explorer-restart, D2D/DXGI, samplers, theme, process rows, 悬浮模式/贴边隐藏/全屏时隐藏, crash & stall forensics | `docs/gotchas.md` |
 | anything spanning files: thread ownership, cross-thread contract, detail/pin model, startup & elevation, project layout | `docs/architecture.md` |
 | a 设置 item's wiring to its sampler | `docs/settings-plumbing.md` |
-| any of the nine scroll views | `docs/scroll-stack.md` |
+| any of the ten scroll views | `docs/scroll-stack.md` |
 
 ## 工程化原则
 
@@ -19,7 +19,7 @@ This file provides guidance to AI coding agents when working with code in this r
 
 ## What this is
 
-A Windows taskbar widget: a self-drawn taskbar overlay (default CPU/内存, 磁盘/GPU, 网络 ↑/↓;
+A Windows taskbar widget: a self-drawn taskbar overlay (default CPU/内存, 磁盘/GPU, 网络 ↑/↓, 功耗;
 外观 → 项目顺序 reorders; GPU 任务栏显示 = 使用率/温度/两者) that pops up a fluent acrylic detail
 window on click. WPF on .NET
 Framework 4.8. **No main window**; the only persistent UI is that overlay — optionally detached
@@ -90,7 +90,7 @@ Windows runner。`publish-cnb-release.ps1` 的三个坑（勿回退，见脚本�
 
 **One process: WPF UI + one sampling STA + N overlay STAs.** `SamplingController` owns the only
 `SystemSampler`; `TaskbarOverlayManager` creates one native `TaskbarWindow` per selected display,
-each with its own `RenderState`, DirectN pipeline and `SetParent` target. Layout still has 5 hit
+each with its own `RenderState`, DirectN pipeline and `SetParent` target. Layout has 6 hit
 slots and two taskbar families plus side-docked forms; floating mode remains a SINGLE window.
 The WPF thread owns detail/settings/menu windows.
 

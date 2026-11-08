@@ -299,7 +299,7 @@ Hover = `HitTest` + a real `Popup` re-rendered per `Refresh`.
 *`src/UI/Common/TouchDragScrollViewer.cs`, `SnappyScrollPhysics.cs`,
 `ScrollCacheDuringTouch.cs`*
 
-Full design: [`scroll-stack.md`](scroll-stack.md). The one rule that bites: **the nine
+Full design: [`scroll-stack.md`](scroll-stack.md). The one rule that bites: **the ten
 scrollers must set `Style="{DynamicResource {x:Type ScrollViewer}}"` explicitly** — WPF
 keyless styles match `TargetType` exactly and do NOT reach derived controls, so without it
 the control silently falls back to the Aero scrollbar.
@@ -1146,7 +1146,7 @@ Win11 族（26H2 的 设置 → 任务栏位置）。
 
 - **尺寸与列数**：`ComputeVerticalLayout` 把「打包后的行」排成**列网格**——普通列 70 DIP，
   网络那一列 84 DIP 且永远是流的**最后一列**，所以「几列放得下」是精确算术：
-  `floor(可用宽/70)`，有网络时 `1 + floor((可用宽-84)/70)`，上限 4 列（`GroupWidths`）。
+  `floor(可用宽/70)`，有网络时 `1 + floor((可用宽-84)/70)`，上限 4 列（`VerticalMaxColumns`）。
   宽 = 列宽之和，高 = 最高列的行数 × 行高。可用宽由 `VerticalAvailWidth` 从
   `TaskbarBandCross`（工作区左边到显示器左边、与任务栏矩形相交的保留带）减去 2 DIP 呼吸边
   算出，存在 `RenderState.AvailWidthDip`；`ComputeTargetSize`/`Draw`/`HitTestSlot`/UI 线程的

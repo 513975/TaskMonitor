@@ -17,13 +17,13 @@ disagree, the code wins — fix this file.
   to primary; only an entirely unusable selection gets the temporary primary fallback.
 - **Taskbar overlay** — each target has a native Win32 window rendered with DirectN and embedded
   into ITS taskbar via `SetParent`. `Start(target)` re-resolves the display's current taskbar on
-  every rebuild. 3 visual groups → **5 hit slots** (0=CPU 1=内存 2=磁盘 3=GPU 4=网络); `WndProc`
+  every rebuild. 3 visual groups → **6 hit slots** (0=CPU 1=内存 2=磁盘 3=GPU 4=网络 5=功耗); `WndProc`
   does the 2D hit-test (left-click toggles a popup, right-click the menu). Slot geometry is
   DYNAMIC (`ComputeLayout` from the sampling mask + `ItemOrder`): the visible metrics pack into
-  the two-row grid in the user's order (设置 → 外观 → 项目顺序; the default remains CPU/内存/磁盘/GPU/网络).
+  the two-row grid in the user's order (设置 → 外观 → 项目顺序; the default remains CPU/内存/磁盘/GPU/网络/功耗).
   A hidden metric leaves no hole (空缺补齐; an odd count's last row may stay empty). 网络 and
   任务栏显示 两者's GPU usage+temperature are each ONE two-row block; a horizontal block starts
-  at a cell's top, so an alignment hole may precede it, and a vertical column break never splits it.
+  at a cell's top, so alignment holes may precede it, and a vertical column break never splits it.
   Empty groups free their width and the window shrinks (`ResizeForLayout`; slot IDs stay stable).
   Both forms, every orientation, hit-testing and popup anchors consume this same geometry.
   **Two taskbar families**, detected per
@@ -102,6 +102,20 @@ Sampling and every overlay have independent `LastTickTickCount` heartbeats. App'
 each expected thread, excluding cancelled entries and those legitimately waiting for a taskbar.
 `SystemSampler.Timed` still names slow sampler steps; `CrashTrace` and native stacks identify the
 specific stalled thread. SRUM unregistration belongs to sampler retirement, never HWND teardown.
+
+The power sampler keeps Windows Energy Meter / Intel RAPL counter access and
+`CallNtPowerInformation(SystemBatteryState)` on its own polling worker. While AC is offline and the
+battery is discharging, battery output takes priority as the estimated whole-system value for the
+headline, history, averages and energy integration, even if a system `Power Meter` is also present.
+Otherwise, a valid system `Power Meter` remains the measured whole-system source. The chart draws a
+battery-backed estimate once as “整机估算” and suppresses the duplicate battery-discharge series.
+Battery charging remains a separate flow and is never used to infer total system consumption. The
+taskbar readout can select which published source it displays; this display-only preference is
+replayed to every overlay by the manager (see the taskbar power-source chain in
+[`settings-plumbing.md`](settings-plumbing.md)). Per-core values allocate the core-domain reading,
+or the package reading when unavailable, by each core's CPU usage. The process ranking allocates
+package power by process CPU percentage and keeps the top eight; both are estimates rather than
+direct per-core or per-process meter readings.
 
 ## DetailWindow = shell + per-metric view
 
@@ -218,7 +232,7 @@ src/
     StartupGuideWindow      first-run display-mode/placement cards with vector diagrams (iNKORE + Mica)
     UpdateAvailableDialog   发现新版本提醒 (iNKORE modern window — 立即更新/不再提醒/稍后)
     Common/                 formatters · ProcessListTip · ProcessKillMenu (the process lists' right-click 结束进程: list-level menu + confirm card, same rebind-proof pattern as ProcessListTip) · ProcessIconCache (the shared per-exe icon cache) · ChartTipHost/ChartPalette (the shared chart hover tip + colors) · PivotNavButtonFix · FollowTagPanel · the scroll stack
-    Details/                the five IDetailViews
+    Details/                the six IDetailViews
     Charts/                 hand-drawn DrawingContext charts
     Settings/               SettingsWindow (iNKORE NavigationView 类别 shell: 通用 / 外观 / 采样项目 + pane-footer 关于 — one visibility-switched TouchDragScrollViewer page each; the categories are SettingsCard/SettingsExpander, 关于 is a centred hero page — logo/name/version pill + live CPU waveform + link buttons, no cards)
 ```

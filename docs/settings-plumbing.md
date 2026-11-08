@@ -43,7 +43,7 @@ Handed each tick to the five per-process samplers, which merge same-exe-path row
 (`ProcessListMerger.MergeByPath`) **before** their top-N cut. Semantics and the svchost
 exemption: [`gotchas.md` §26](gotchas.md#26-合并相同程序-merges-before-the-top-8-cut).
 
-## 2. 采样 (per-metric switches) — `{Cpu,Ram,Disk,Gpu,Net}SamplingEnabled` (null = enabled)
+## 2. 采样 (per-metric switches) — `{Cpu,Ram,Disk,Gpu,Net,Power}SamplingEnabled` (null = enabled)
 
 | | |
 |---|---|
@@ -51,8 +51,8 @@ exemption: [`gotchas.md` §26](gotchas.md#26-合并相同程序-merges-before-th
 | Sampler state | `SystemSampler._enabledMask` (volatile, next tick) |
 | WM_APP | **YES — `WM_APP_SET_METRICS`**: the slot is hidden and the overlay re-lays-out/resizes |
 
-App converts the five nullable booleans to/from one int mask (`SamplingMaskOf`), bit order
-= overlay hit-slot order (`SystemSampler.MaskCpu` … `MaskNet`). At least one metric must stay
+App converts the six nullable booleans to/from one int mask (`SamplingMaskOf`), bit order
+= overlay hit-slot order (`SystemSampler.MaskCpu` … `MaskPower`). At least one metric must stay
 enabled: the settings page restores the last switch when its close is attempted, and a
 hand-edited all-off config falls back to CPU so the runtime mask is never zero. This mask is
 **separate** from `TaskbarWindow._clickDisabledMask` (pinned-window press suppression) —
@@ -92,7 +92,8 @@ while a present-but-unsupported adapter stays "--". The unit is display-side onl
 `GpuTempText.Format` is the ONE formatter for the taskbar row and the detail popup's
 per-adapter texts alike. Orthogonal to: `GpuSamplingEnabled` (采样 gates the data, this
 gates the row) and `GpuDisplay` (显示方式 still picks the utilization headline). Layout
-consequences (5 packed positions, 4 groups, both rows are hit slot 3):
+consequences (up to 10 packed positions across 5 horizontal groups; GPU 使用率/温度/两者
+all map to hit slot 3, with 两者 occupying two positions):
 `TaskbarWindow.ComputeLayout` and its ASCII table.
 
 ## 5. 网络适配器 — `NetAdapterId` + `NetAdapterName` (null = 自动)
@@ -235,17 +236,17 @@ Not a sampler setting. `TaskbarDisplayCatalog` enumerates every active monitor w
   stable ID and current HWND/HMONITOR association, cancelled entries cannot restart, and every
   fresh entry inherits the manager's complete visual configuration.
 
-## 12. 项目顺序 — `ItemOrder` (null = CPU/内存/磁盘/GPU/网络)
+## 12. 项目顺序 — `ItemOrder` (null = CPU/内存/磁盘/GPU/网络/功耗)
 
 A TaskbarWindow-layout chain shared by the taskbar and floating forms; no sampler state.
 
 | | |
 |---|---|
 | Setter | `App.OnItemOrderChanged` → `TaskbarOverlayManager.SetItemOrder` → `TaskbarWindow.SetItemOrder` |
-| Window state | `_itemOrder`, an immutable normalized `int[]` of slots 0=CPU 1=内存 2=磁盘 3=GPU 4=网络 |
+| Window state | `_itemOrder`, an immutable normalized `int[]` of slots 0=CPU 1=内存 2=磁盘 3=GPU 4=网络 5=功耗 |
 | WM_APP | **YES — `WM_APP_SET_METRICS`**: drawing, hit-testing, popup anchors and target size all recompute at once |
 
-- **UI:** 设置 → 外观 → 项目顺序 is a five-row drag/drop list plus 恢复默认. It includes sampling-disabled
+- **UI:** 设置 → 外观 → 项目顺序 is a six-row drag/drop list plus 恢复默认. It includes sampling-disabled
   metrics and reports once on a valid drop, not on every mouse move.
 - **Yaml:** a list of slot numbers, or null for the default order. Normalization removes invalid/duplicate
   entries and appends missing ones in default order; restoring the default writes null.
@@ -268,6 +269,24 @@ Off skips only the horizontal/vertical separator passes; text, hover/selection f
 layout and hit-testing are unchanged. App writes only the off state (`showSeparators: false`) and
 logs the change. `ConfigureWindow` replays the setting to every new/rebuilt overlay, and the startup
 geometry log includes `分割线=True/False`.
+
+## 14. 任务栏功耗来源 — `PowerTaskbarSource` (null = 电池功耗)
+
+This is a taskbar rendering preference; it does not change sampling or the power detail page.
+
+| | |
+|---|---|
+| Setter | `App.OnPowerTaskbarSourceChanged` → `TaskbarOverlayManager.SetPowerTaskbarSource` → `TaskbarWindow.SetPowerTaskbarSource` |
+| Window state | `_powerTaskbarSource` (volatile, default `Battery`) |
+| WM_APP | **`WM_APP_SNAPSHOT`** — redraws the current snapshot immediately; geometry is unchanged |
+
+设置 → 采样项目 → 功耗 offers 电池功耗 (default), CPU 封装功耗 and 系统整机功耗. App stores
+only non-default values in `settings.yaml` (`powerTaskbarSource: CpuPackage` or `System`); a missing
+key remains 电池功耗. Every overlay, including newly created or rebuilt displays, receives the
+same setting. The label is always `功耗`; the value comes only from the selected source, showing
+`--` if that source has no reading instead of silently changing the measurement basis. Battery
+charging is prefixed `+`, discharging `-`, and an idle battery shows `0.0W`; the power detail page
+continues to show all sources.
 
 ## Not in settings.yaml at all
 

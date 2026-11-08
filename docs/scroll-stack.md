@@ -10,10 +10,10 @@ Three files, one design. **`src/UI/Common/TouchDragScrollViewer.cs` is the singl
 | `SnappyScrollPhysics.cs` | `IScrollPhysics` replacement: library-equivalent feel + two bugfixes |
 | `ScrollCacheDuringTouch.cs` | Attached behavior: windowed `BitmapCache` during touch drags, gated by the process-wide UAC-safety switch (currently OFF) |
 
-**Where it is used:** the four settings pages (one per NavigationView 类别 in
-SettingsWindow) + the five detail views' process lists. All nine
-scrollers are `TouchDragScrollViewer`, all nine set `Physics` to `SnappyScrollPhysics`, and
-all nine set `ScrollCacheDuringTouch.Enabled="True"`.
+**Where it is used:** the three NavigationView category pages plus the About page in
+SettingsWindow, and the six detail views' process lists. All ten scrollers are
+`TouchDragScrollViewer`, all ten set `Physics` to `SnappyScrollPhysics`, and all ten set
+`ScrollCacheDuringTouch.Enabled="True"`.
 
 ## Why it exists at all
 
@@ -82,7 +82,7 @@ keyless styles match `TargetType` exactly and do not reach derived controls. Wit
 set, `Style == null` (verified by dump) and the control falls back to the classic Aero
 scrollbar, which does not auto-hide.
 
-Therefore all nine scrollers set:
+Therefore all ten scrollers set:
 
 ```xml
 Style="{DynamicResource {x:Type ScrollViewer}}"
