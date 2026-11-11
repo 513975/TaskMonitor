@@ -1354,3 +1354,75 @@ Window / Popup 模板、预热窗口、设置窗口和不可见菜单宿主正�
 最终也没有保留任何“第二次启动跳过 UAC”的规避逻辑。验证用外部 `cmd.exe /c exit` 的 runas
 触发 UAC 并取消：设置滚动/切换与任务栏右键均保持正常。不得仅为阴影或动画性能重新打开
 此开关；要恢复必须先证明当前 WPF/runtime 已解决该 display-reset 缺陷。
+
+## 49. RAPL 重枚举保留句柄，单域故障不得带掉 CPU Package
+
+*`src/Sampling/PowerSampler.cs`: `HardwarePowerSensorSampler.OpenCounters`,
+`ReadFrame`, `ReadCounterWatts`, `InvalidateCounter`*
+
+游戏本曾报告 CPU Package 读数间歇变为不可用。代码审查发现两条会造成整组掉线的路径：
+每分钟重枚举时无条件释放并重开所有 `PerformanceCounter`，重置了 rate counter 的采样基线；
+另外，一个 PP1/DRAM 子域读取异常会逃出 `ReadFrame`，外层 catch 随即释放所有 RAPL 句柄并
+延迟重试，连带中断 CPU Package。
+
+规则：
+
+- 低频枚举只增删变化的实例；实例集合暂时为空时保留已有句柄。未变化的计数器绝不能为
+  “刷新”而重开。
+- 每个域独立打开、读取和重连。单个子域故障不得释放其它域；失败重试留在硬件采样线程，
+  电池 API 故障也不得释放 RAPL 句柄；不在热路径逐 tick 写日志。
+- Package 计数器短暂失效时，最多保留最近 3 秒的值，UI 必须显示“暂时沿用上次读数”并保留
+  原始测量时间。任务栏没有空间标记暂存态，因此只显示新鲜实测值。暂存样本不能进入曲线、
+  平均/峰值或能耗积分；超过期限就显示不可用。
+- 多个 Package 实例汇总时，每个实例都必须有当前或期限内暂存读数；任一实例缺失就不发布
+  部分和，避免低估封装功耗并污染峰值或核心累计能耗。
+
+当前修复针对已确认的代码风险；除非用户机器的日志能对应这些路径，否则不把它表述成该
+游戏本偶发断档的唯一根因。
+
+## 50. 任务栏自动功耗按 AC 在线状态切换
+
+*`src/Sampling/PowerSampler.cs`、`src/UI/TaskbarWindow.cs`*
+
+笔记本高负载时可能同时连接适配器并从电池取电。`BatteryState == Discharging` 因而不能
+用来推断“正在离电”；自动模式必须看 `CallNtPowerInformation(SystemBatteryState)` 的
+`AcOnLine`：在线显示核心总功耗，明确离线且有电池放电读数时显示电池侧功率。AC 状态未知、
+离线但无有效放电读数时显示 `--`，不猜测来源。
+
+核心总功耗只在 GPU 拓扑和数据源完整时计算：确认 Intel 核显-only 时用 RAPL Package
+（PP1 已在 Package 内，不再累加）；检测到独显时，要求每个 DXCore 独显适配器都有通过名称
+一一匹配的新鲜、实测 NVML 功率，否则不可用。任务栏和详情页共享这一结果。
+关闭 GPU 显示采样时仍执行低频 DXCore 拓扑枚举，仅用于核心总功耗完整性判断；不得读取 GPU
+利用率、显存或温度来绕过其采样开关。
+
+## 51. 功耗图沿用全宽历史图样式；核心能耗只积完整样本
+
+*`src/UI/Charts/PowerHistoryChart.cs`、`src/Sampling/PowerSampler.cs`*
+
+功耗图沿用 CPU/RAM/Disk/GPU 历史图规范：整个控件 bounds 都是绘图区，绘图区不额外预留纵轴或
+时间标签空间；用三条内部分隔线、rounded clip、1.5 DIP 曲线和 48/255 半透明填充，图表高度
+与其它详情页统一。功率和时间通过共享的悬浮提示及页面读数查看。`HitTest`、网格、面积和曲线
+共享全控件 bounds。CPU Package、GPU、放电和充电曲线都填充到零线；先画网格、再画所有半透明
+面积、最后画所有曲线线条，避免后画面积遮住前面的曲线。缺测仍按 null 分段，不能跨缺口填充。
+
+详情页 CPU Package 峰值与 GPU NVML 汇总峰值是最近最多 60 个采样点的滚动峰值，实际窗口随
+采样间隔变化。核心累计能耗只对拓扑确认后的完整、新鲜 `CoreTotalWatts` 做梯形积分；读数
+缺失、过期或不完整时中断积分基线但保留累计 Wh。功耗采样暂停后重启时清空滚动历史/峰值窗口，
+不清空本次运行累计能耗，且绝不跨停采或缺测时间外插。重新启用时的 prime 帧只恢复
+传感器状态，不作为下一段积分的左端点。
+
+## 52. 任务栏功耗栏位须按最长标签和值分配宽度
+
+*`src/UI/TaskbarWindow.cs`: `PowerTaskbarText`, `OverlayLayout.GroupW`,
+`OverlayLayout.ColumnWidth`, `DrawPosRow`, `HitTestSlot`*
+
+任务栏单行栏位使用同一 cell 内的左对齐标签和右对齐数值。功耗组合（“功耗”加带小数和单位
+的瓦数）比此前用于确定普通 cell 下限的 CPU/内存/磁盘组合更宽；直接复用 65/70 DIP cell 会
+让两段文字相撞。不要缩小精度或截断值来掩盖几何问题。
+
+规则：
+
+- 包含功耗的横向 group 和侧边任务栏多列都使用独立功耗宽度；侧边单列在可用宽度不足时切换
+  到既有的上下两行标签/数值形式。
+- 所有布局尺寸、绘制 rect、分隔线、点击命中和弹窗锚点都必须从同一个布局宽度计算。多列
+  侧栏选列数时预留网络与功耗扩宽，确保最终总宽不超可用任务栏厚度。

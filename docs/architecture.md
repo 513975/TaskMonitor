@@ -103,19 +103,45 @@ each expected thread, excluding cancelled entries and those legitimately waiting
 `SystemSampler.Timed` still names slow sampler steps; `CrashTrace` and native stacks identify the
 specific stalled thread. SRUM unregistration belongs to sampler retirement, never HWND teardown.
 
-The power sampler keeps Windows Energy Meter / Intel RAPL counter access and
-`CallNtPowerInformation(SystemBatteryState)` on its own polling worker. While AC is offline and the
-battery is discharging, battery output takes priority as the estimated whole-system value for the
-headline, history, averages and energy integration, even if a system `Power Meter` is also present.
-Otherwise, a valid system `Power Meter` remains the measured whole-system source. The chart draws a
-battery-backed estimate once as “整机估算” and suppresses the duplicate battery-discharge series.
-Battery charging remains a separate flow and is never used to infer total system consumption. The
-taskbar readout can select which published source it displays; this display-only preference is
-replayed to every overlay by the manager (see the taskbar power-source chain in
-[`settings-plumbing.md`](settings-plumbing.md)). Per-core values allocate the core-domain reading,
-or the package reading when unavailable, by each core's CPU usage. The process ranking allocates
-package power by process CPU percentage and keeps the top eight; both are estimates rather than
-direct per-core or per-process meter readings.
+The power sampler reads Windows Energy Meter / Intel RAPL domains and
+`CallNtPowerInformation(SystemBatteryState)` on its own polling worker. RAPL instances are
+re-enumerated once per minute and retried at a low cadence when none are available, so provider
+changes can be picked up without adding enumeration to every sample. Unchanged counter handles stay
+open across inventory scans; a transient failure in one child domain does not release the other
+domains. A recent CPU Package value may be retained for up to three seconds during a transient
+counter failure and is labeled as a stale reading rather than integrated into history. CPU Package
+and available RAPL subdomains remain separate sensor readings; Package and PP0/IA have different
+scopes, overlapping package and child domains are not expected to match or be added together.
+Battery power is reported only as battery charging/discharging
+flow. There is no whole-system power value, and CPU power is not apportioned to individual cores
+or processes. The
+optional NVIDIA path loads the driver-provided NVML library dynamically on its own worker and
+publishes power readings by the NVML device UUID; unsupported or missing driver telemetry stays
+unavailable and never blocks utilization/temperature sampling. It is not joined to a DXCore GPU
+tab by display order. The power detail headline "核心总功耗" uses DXCore topology: on a confirmed
+iGPU-only Intel system it is the fresh CPU Package reading (which already includes the integrated
+GPU domain); when discrete adapters exist, it is a fresh CPU Package plus measured NVML GPU readings
+with a one-to-one adapter-name match for every DXCore discrete adapter. Unknown topology, missing
+GPU telemetry or stale inputs make the value unavailable rather than partial. Battery flow is
+excluded, and the value is not whole-system power. RAPL PP1 is not added again because it may
+already be included in CPU
+Package. The power history chart adds a GPU series from the complete NVML aggregate, with gaps for
+unsupported/stale samples. The taskbar defaults to automatic source selection: AC online displays
+core total; confirmed AC offline with a present, discharging battery displays the positive
+battery-side draw magnitude. This uses the AC-online flag, never the battery-discharge flag, because
+some laptops supplement AC input from the battery under heavy load. Unknown AC state displays `--`.
+If GPU utilization sampling is disabled, the sampler still runs only the low-cadence DXCore adapter
+topology probe needed to validate this aggregate; it does not sample GPU utilization, memory or
+temperature. Manual battery, CPU Package, and core-total choices remain available. This
+display-only preference is replayed to every overlay by the manager (see the taskbar power-source chain in
+[`settings-plumbing.md`](settings-plumbing.md)).
+
+The power detail statistics row shows the rolling maximum CPU Package power, rolling maximum of the
+complete NVML GPU aggregate, and session cumulative core energy. Peak windows hold at most 60
+published samples, so their duration follows the configured taskbar sampling interval. Core energy
+trapezoid-integrates only fresh, measured CoreTotal values; source gaps break the integration
+baseline without discarding prior accumulated Wh. Pausing power sampling clears rolling histories
+and integration baselines, while session core energy is retained.
 
 ## DetailWindow = shell + per-metric view
 

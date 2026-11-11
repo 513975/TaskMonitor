@@ -11,12 +11,7 @@ namespace task_monitor
     /// </summary>
     public sealed class PowerHistoryChart : FrameworkElement
     {
-        public static readonly DependencyProperty SystemValuesProperty =
-            DependencyProperty.Register(
-                nameof(SystemValues),
-                typeof(IReadOnlyList<double?>),
-                typeof(PowerHistoryChart),
-                new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+        private const byte SeriesFillAlpha = 48;
 
         public static readonly DependencyProperty CpuPackageValuesProperty =
             DependencyProperty.Register(
@@ -39,12 +34,12 @@ namespace task_monitor
                 typeof(PowerHistoryChart),
                 new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
-        public static readonly DependencyProperty HistoryDurationSecondsProperty =
+        public static readonly DependencyProperty GpuPowerValuesProperty =
             DependencyProperty.Register(
-                nameof(HistoryDurationSeconds),
-                typeof(int),
+                nameof(GpuPowerValues),
+                typeof(IReadOnlyList<double?>),
                 typeof(PowerHistoryChart),
-                new FrameworkPropertyMetadata(60, FrameworkPropertyMetadataOptions.AffectsRender));
+                new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
         public static readonly DependencyProperty BackgroundProperty =
             DependencyProperty.Register(
@@ -52,13 +47,6 @@ namespace task_monitor
                 typeof(Brush),
                 typeof(PowerHistoryChart),
                 new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
-
-        public static readonly DependencyProperty SystemColorProperty =
-            DependencyProperty.Register(
-                nameof(SystemColor),
-                typeof(Color),
-                typeof(PowerHistoryChart),
-                new FrameworkPropertyMetadata(Color.FromRgb(0x00, 0x78, 0xD4), FrameworkPropertyMetadataOptions.AffectsRender));
 
         public static readonly DependencyProperty CpuPackageColorProperty =
             DependencyProperty.Register(
@@ -81,6 +69,13 @@ namespace task_monitor
                 typeof(PowerHistoryChart),
                 new FrameworkPropertyMetadata(Color.FromRgb(0x8B, 0x5C, 0xF6), FrameworkPropertyMetadataOptions.AffectsRender));
 
+        public static readonly DependencyProperty GpuPowerColorProperty =
+            DependencyProperty.Register(
+                nameof(GpuPowerColor),
+                typeof(Color),
+                typeof(PowerHistoryChart),
+                new FrameworkPropertyMetadata(Color.FromRgb(0x0E, 0xA5, 0xE9), FrameworkPropertyMetadataOptions.AffectsRender));
+
         public static readonly DependencyProperty GridColorProperty =
             DependencyProperty.Register(
                 nameof(GridColor),
@@ -102,12 +97,6 @@ namespace task_monitor
                 typeof(PowerHistoryChart),
                 new FrameworkPropertyMetadata(6.0, FrameworkPropertyMetadataOptions.AffectsRender));
 
-        public IReadOnlyList<double?> SystemValues
-        {
-            get => (IReadOnlyList<double?>)GetValue(SystemValuesProperty);
-            set => SetValue(SystemValuesProperty, value);
-        }
-
         public IReadOnlyList<double?> CpuPackageValues
         {
             get => (IReadOnlyList<double?>)GetValue(CpuPackageValuesProperty);
@@ -126,22 +115,16 @@ namespace task_monitor
             set => SetValue(BatteryDischargeValuesProperty, value);
         }
 
-        public int HistoryDurationSeconds
+        public IReadOnlyList<double?> GpuPowerValues
         {
-            get => (int)GetValue(HistoryDurationSecondsProperty);
-            set => SetValue(HistoryDurationSecondsProperty, value);
+            get => (IReadOnlyList<double?>)GetValue(GpuPowerValuesProperty);
+            set => SetValue(GpuPowerValuesProperty, value);
         }
 
         public Brush Background
         {
             get => (Brush)GetValue(BackgroundProperty);
             set => SetValue(BackgroundProperty, value);
-        }
-
-        public Color SystemColor
-        {
-            get => (Color)GetValue(SystemColorProperty);
-            set => SetValue(SystemColorProperty, value);
         }
 
         public Color CpuPackageColor
@@ -160,6 +143,12 @@ namespace task_monitor
         {
             get => (Color)GetValue(BatteryChargeColorProperty);
             set => SetValue(BatteryChargeColorProperty, value);
+        }
+
+        public Color GpuPowerColor
+        {
+            get => (Color)GetValue(GpuPowerColorProperty);
+            set => SetValue(GpuPowerColorProperty, value);
         }
 
         public Color GridColor
@@ -182,14 +171,14 @@ namespace task_monitor
 
         /// <summary>
         /// Returns the nearest shared sample index for a pointer position.
-        /// The caller can display both series in one tooltip.
+        /// The caller can display every power series at the same sample index.
         /// </summary>
         public int HitTest(Point pt)
         {
-            int count = Math.Max(SystemValues?.Count ?? 0,
-                Math.Max(CpuPackageValues?.Count ?? 0,
+            int count = Math.Max(CpuPackageValues?.Count ?? 0,
+                Math.Max(GpuPowerValues?.Count ?? 0,
                     Math.Max(BatteryChargeValues?.Count ?? 0, BatteryDischargeValues?.Count ?? 0)));
-            Rect plot = GetPlotRect(ActualWidth, ActualHeight);
+            Rect plot = new Rect(0, 0, ActualWidth, ActualHeight);
             if (count < 2 || plot.Width <= 0 || plot.Height <= 0
                 || pt.X < plot.Left || pt.X > plot.Right
                 || pt.Y < plot.Top || pt.Y > plot.Bottom)
@@ -214,16 +203,31 @@ namespace task_monitor
             if (Background != null)
                 dc.DrawRectangle(Background, null, new Rect(0, 0, w, h));
 
-            double max = FindNiceMaximum(SystemValues, CpuPackageValues,
+            double max = FindNiceMaximum(CpuPackageValues, GpuPowerValues,
                 BatteryChargeValues, BatteryDischargeValues);
-            Rect plot = GetPlotRect(w, h);
-            DrawGrid(dc, plot, max);
-            DrawTimeLabels(dc, plot);
+            Rect plot = new Rect(0, 0, w, h);
+            DrawGrid(dc, plot);
+
             dc.PushClip(new RectangleGeometry(plot));
-            DrawSeries(dc, SystemValues, plot, max, SystemColor, fill: true, fillAlpha: 34);
-            DrawSeries(dc, CpuPackageValues, plot, max, CpuPackageColor, fill: false, fillAlpha: 0);
-            DrawSeries(dc, BatteryDischargeValues, plot, max, BatteryColor, fill: false, fillAlpha: 0);
-            DrawSeries(dc, BatteryChargeValues, plot, max, BatteryChargeColor, fill: false, fillAlpha: 0);
+            DrawSeries(dc, CpuPackageValues, plot, max, CpuPackageColor,
+                fillAlpha: SeriesFillAlpha, drawFill: true, drawLine: false);
+            DrawSeries(dc, GpuPowerValues, plot, max, GpuPowerColor,
+                fillAlpha: SeriesFillAlpha, drawFill: true, drawLine: false);
+            DrawSeries(dc, BatteryDischargeValues, plot, max, BatteryColor,
+                fillAlpha: SeriesFillAlpha, drawFill: true, drawLine: false);
+            DrawSeries(dc, BatteryChargeValues, plot, max, BatteryChargeColor,
+                fillAlpha: SeriesFillAlpha, drawFill: true, drawLine: false);
+            dc.Pop();
+
+            dc.PushClip(new RectangleGeometry(plot));
+            DrawSeries(dc, CpuPackageValues, plot, max, CpuPackageColor,
+                fillAlpha: 0, drawFill: false, drawLine: true);
+            DrawSeries(dc, GpuPowerValues, plot, max, GpuPowerColor,
+                fillAlpha: 0, drawFill: false, drawLine: true);
+            DrawSeries(dc, BatteryDischargeValues, plot, max, BatteryColor,
+                fillAlpha: 0, drawFill: false, drawLine: true);
+            DrawSeries(dc, BatteryChargeValues, plot, max, BatteryChargeColor,
+                fillAlpha: 0, drawFill: false, drawLine: true);
             dc.Pop();
             dc.Pop();
 
@@ -235,84 +239,23 @@ namespace task_monitor
                 radius, radius);
         }
 
-        private Rect GetPlotRect(double w, double h)
-        {
-            const double left = 42;
-            const double right = 6;
-            const double top = 6;
-            const double bottom = 20;
-            return new Rect(left, top,
-                Math.Max(0, w - left - right),
-                Math.Max(0, h - top - bottom));
-        }
-
-        private void DrawGrid(DrawingContext dc, Rect plot, double max)
+        private void DrawGrid(DrawingContext dc, Rect plot)
         {
             var pen = new Pen(new SolidColorBrush(GridColor), 0.75);
             if (pen.CanFreeze) pen.Freeze();
 
-            for (int i = 0; i <= 4; i++)
+            // Match UsageHistoryChart's full-bounds grid: three interior guides in
+            // each direction, leaving the rounded frame as the outer boundary.
+            for (int i = 1; i <= 3; i++)
             {
-                double fraction = i / 4.0;
-                double y = plot.Top + plot.Height * fraction;
+                double y = plot.Height * (1.0 - i / 4.0);
                 dc.DrawLine(pen, new Point(plot.Left, y), new Point(plot.Right, y));
-                double value = max * (1.0 - fraction);
-                DrawLabel(dc, FormatAxisWatts(value),
-                    new Point(0, y), TextAlignment.Right, verticalCenter: true);
             }
 
             for (int i = 1; i <= 3; i++)
             {
-                double x = plot.Left + plot.Width * (i / 4.0);
+                double x = plot.Width * (i / 4.0);
                 dc.DrawLine(pen, new Point(x, plot.Top), new Point(x, plot.Bottom));
-            }
-        }
-
-        private void DrawTimeLabels(DrawingContext dc, Rect plot)
-        {
-            int duration = Math.Max(1, HistoryDurationSeconds);
-            DrawLabel(dc, duration + "秒前", new Point(plot.Left, plot.Bottom + 2),
-                TextAlignment.Left, verticalCenter: false);
-            DrawLabel(dc, (duration / 2) + "秒前", new Point(plot.Left + plot.Width / 2, plot.Bottom + 2),
-                TextAlignment.Center, verticalCenter: false);
-            DrawLabel(dc, "现在", new Point(plot.Right, plot.Bottom + 2),
-                TextAlignment.Right, verticalCenter: false);
-        }
-
-        private void DrawLabel(DrawingContext dc, string text, Point point,
-            TextAlignment alignment, bool verticalCenter)
-        {
-            var brush = new SolidColorBrush(LabelColor);
-            if (brush.CanFreeze) brush.Freeze();
-            var formatted = new FormattedText(
-                text,
-                System.Globalization.CultureInfo.CurrentCulture,
-                FlowDirection.LeftToRight,
-                new Typeface(SystemFonts.MessageFontFamily, FontStyles.Normal,
-                    FontWeights.Normal, FontStretches.Normal),
-                9,
-                brush,
-                VisualTreeHelper.GetDpi(this).PixelsPerDip)
-            {
-                TextAlignment = alignment,
-            };
-            double x = alignment == TextAlignment.Center ? point.X - formatted.Width / 2.0
-                    : alignment == TextAlignment.Right ? point.X - formatted.Width
-                    : point.X;
-            double y = verticalCenter ? point.Y - formatted.Height / 2.0 : point.Y;
-            dc.DrawText(formatted, new Point(x, y));
-        }
-
-        private static string FormatAxisWatts(double watts)
-            => watts > 0 ? $"{watts:F0} W" : watts < 0 ? $"{watts:F0} W" : "0 W";
-
-        private Color LabelColor
-        {
-            get
-            {
-                var brush = Application.Current?.TryFindResource("TextFillColorSecondaryBrush") as SolidColorBrush;
-                if (brush != null) return brush.Color;
-                return Color.FromRgb(0x88, 0x88, 0x88);
             }
         }
 
@@ -354,17 +297,26 @@ namespace task_monitor
             Rect plot,
             double max,
             Color color,
-            bool fill,
-            byte fillAlpha)
+            byte fillAlpha,
+            bool drawFill,
+            bool drawLine)
         {
             if (values == null || values.Count < 2) return;
 
             double stepX = plot.Width / (values.Count - 1);
-            var linePen = new Pen(new SolidColorBrush(color), 1.7);
-            if (linePen.CanFreeze) linePen.Freeze();
+            Pen linePen = null;
+            if (drawLine)
+            {
+                linePen = new Pen(new SolidColorBrush(color), 1.5);
+                if (linePen.CanFreeze) linePen.Freeze();
+            }
 
-            var fillBrush = new SolidColorBrush(Color.FromArgb(fillAlpha, color.R, color.G, color.B));
-            if (fillBrush.CanFreeze) fillBrush.Freeze();
+            Brush fillBrush = null;
+            if (drawFill)
+            {
+                fillBrush = new SolidColorBrush(Color.FromArgb(fillAlpha, color.R, color.G, color.B));
+                if (fillBrush.CanFreeze) fillBrush.Freeze();
+            }
 
             int segmentStart = -1;
             for (int i = 0; i <= values.Count; i++)
@@ -379,8 +331,8 @@ namespace task_monitor
                     int segmentEnd = i - 1;
                     if (segmentEnd > segmentStart)
                         DrawSegment(dc, values, segmentStart, segmentEnd, stepX, plot, max, linePen,
-                            fill ? fillBrush : null);
-                    else
+                            fillBrush, drawFill, drawLine);
+                    else if (drawLine)
                     {
                         Point point = PointAt(values, segmentStart, stepX, plot, max);
                         double x = point.X;
@@ -401,18 +353,11 @@ namespace task_monitor
             Rect plot,
             double max,
             Pen linePen,
-            Brush fillBrush)
+            Brush fillBrush,
+            bool drawFill,
+            bool drawLine)
         {
-            var line = new StreamGeometry();
-            using (var ctx = line.Open())
-            {
-                ctx.BeginFigure(PointAt(values, start, stepX, plot, max), false, false);
-                for (int i = start + 1; i <= end; i++)
-                    ctx.LineTo(PointAt(values, i, stepX, plot, max), true, false);
-            }
-            if (line.CanFreeze) line.Freeze();
-
-            if (fillBrush != null)
+            if (drawFill)
             {
                 var area = new StreamGeometry();
                 using (var ctx = area.Open())
@@ -427,7 +372,19 @@ namespace task_monitor
                 if (area.CanFreeze) area.Freeze();
                 dc.DrawGeometry(fillBrush, null, area);
             }
-            dc.DrawGeometry(null, linePen, line);
+
+            if (drawLine)
+            {
+                var line = new StreamGeometry();
+                using (var ctx = line.Open())
+                {
+                    ctx.BeginFigure(PointAt(values, start, stepX, plot, max), false, false);
+                    for (int i = start + 1; i <= end; i++)
+                        ctx.LineTo(PointAt(values, i, stepX, plot, max), true, false);
+                }
+                if (line.CanFreeze) line.Freeze();
+                dc.DrawGeometry(null, linePen, line);
+            }
         }
 
         private static Point PointAt(IReadOnlyList<double?> values, int index, double stepX, Rect plot, double max)

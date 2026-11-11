@@ -496,12 +496,13 @@
                             <ui:ToggleSwitch x:Name="PowerSwitch" Tag="5" Toggled="MetricSwitch_Toggled" />
                             <ui:SettingsExpander.Items>
                                 <ui:SettingsCard Header="任务栏显示来源"
-                                                 Description="选择任务栏功耗栏显示的功耗口径；来源不可用时显示 --。">
+                                                 Description="自动模式按外接电源状态切换：插电显示核心总功耗，离电显示电池放电功率；状态或数据不可用时显示 --。核心总功耗需要可识别的 GPU 拓扑和完整传感器数据。">
                                     <ComboBox x:Name="PowerSourceCombo" MinWidth="180"
                                               SelectionChanged="PowerSourceCombo_SelectionChanged">
-                                        <ComboBoxItem Content="电池功耗（默认）" />
+                                        <ComboBoxItem Content="自动（默认）" />
+                                        <ComboBoxItem Content="核心总功耗" />
                                         <ComboBoxItem Content="CPU 封装功耗" />
-                                        <ComboBoxItem Content="系统整机功耗" />
+                                        <ComboBoxItem Content="电池功耗" />
                                     </ComboBox>
                                 </ui:SettingsCard>
                             </ui:SettingsExpander.Items>

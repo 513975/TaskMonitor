@@ -17,11 +17,36 @@
                                 Margin="4,0,0,0" />
             </StackPanel>
             <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center">
-                <TextBlock x:Name="SystemHeaderText" FontSize="22"
+                <TextBlock x:Name="CoreTotalHeaderText" FontSize="22"
                            HorizontalAlignment="Right" />
-                <TextBlock x:Name="SystemHeaderLabelText" FontSize="9"
+                <TextBlock x:Name="CoreTotalHeaderLabelText" FontSize="9"
                            HorizontalAlignment="Right"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Margin="0,-4,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="CPU 封装当前功率" FontSize="10"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="CpuInputWattsText" Text="—" FontSize="13" />
+                    <TextBlock x:Name="CpuInputStatusText" Margin="6,2,0,0" FontSize="10"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+                <TextBlock Text="GPU 当前功率合计（NVML）" FontSize="10"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="GpuInputWattsText" Text="—" FontSize="13" />
+                    <TextBlock x:Name="GpuInputStatusText" Margin="6,2,0,0" FontSize="10"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
             </StackPanel>
         </Grid>
 
@@ -29,53 +54,47 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" FontSize="12">
-                <Run Text="CPU 封装：" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <Run x:Name="CpuPackageValueRun" Text="—" />
-            </TextBlock>
-            <TextBlock Grid.Column="1" FontSize="12">
+            <TextBlock x:Name="BatteryStatusTextBlock" Grid.Column="0" FontSize="12">
                 <Run Text="电池状态：" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 <Run x:Name="BatteryStatusRun" Text="—" />
             </TextBlock>
-            <TextBlock Grid.Column="2" FontSize="12" TextTrimming="CharacterEllipsis"
+            <TextBlock Grid.Column="1" FontSize="12" TextTrimming="CharacterEllipsis"
                        ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}">
                 <Run Text="来源：" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <Run x:Name="SystemSourceRun" Text="—" />
+                <Run x:Name="CpuSourceRun" Text="—" />
             </TextBlock>
         </Grid>
 
-        <Border Background="Transparent" BorderThickness="0" Padding="0,4" Height="138">
+        <Border Background="Transparent" BorderThickness="0" Padding="0,4" Height="124">
             <local:PowerHistoryChart x:Name="PowerChart" Background="Transparent" />
         </Border>
 
         <Grid Margin="0,-8,0,0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.2*" />
+                <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                <Ellipse x:Name="SystemLegendDot" Width="7" Height="7" Margin="0,0,6,0" />
-                <TextBlock x:Name="SystemLegendText" Text="整机功率" FontSize="11"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <Ellipse x:Name="CpuLegendDot" Width="7" Height="7" Margin="0,0,6,0" />
                 <TextBlock Text="CPU 封装" FontSize="11"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </StackPanel>
-            <StackPanel x:Name="BatteryLegendPanel" Grid.Column="2"
-                        Orientation="Horizontal" VerticalAlignment="Center">
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Ellipse x:Name="GpuLegendDot" Width="7" Height="7" Margin="0,0,6,0" />
+                <TextBlock Text="GPU 合计" FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                 <Ellipse x:Name="BatteryLegendDot" Width="7" Height="7" Margin="0,0,6,0" />
-                <TextBlock x:Name="BatteryLegendText" Text="电池放电" FontSize="11"
+                <TextBlock x:Name="BatteryLegendText" Text="放电" FontSize="11"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </StackPanel>
             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                 <Ellipse x:Name="BatteryChargeLegendDot" Width="7" Height="7" Margin="0,0,6,0" />
-                <TextBlock Text="电池充电" FontSize="11"
+                <TextBlock Text="充电" FontSize="11"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </StackPanel>
         </Grid>
@@ -83,7 +102,7 @@
         <Border x:Name="PowerUnavailableNotice" Background="Transparent" BorderThickness="0"
                 Padding="0,18,0,4" Visibility="Collapsed">
             <TextBlock x:Name="PowerUnavailableText"
-                       Text="当前设备未提供可用的功耗传感器读数"
+                       Text="当前没有可用的 CPU 封装功率读数"
                        FontSize="12" TextWrapping="Wrap" HorizontalAlignment="Center"
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
         </Border>
@@ -95,19 +114,19 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0">
-                <TextBlock Text="平均功率" FontSize="11"
+                <TextBlock Text="CPU 封装峰值功率" FontSize="11"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <TextBlock x:Name="SystemAverageText" Text="—" FontSize="13" />
+                <TextBlock x:Name="CpuPackagePeakText" Text="—" FontSize="13" />
             </StackPanel>
             <StackPanel Grid.Column="1">
-                <TextBlock Text="峰值功率" FontSize="11"
+                <TextBlock Text="GPU 峰值功率" FontSize="11"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <TextBlock x:Name="SystemPeakText" Text="—" FontSize="13" />
+                <TextBlock x:Name="GpuPowerPeakText" Text="—" FontSize="13" />
             </StackPanel>
             <StackPanel Grid.Column="2">
-                <TextBlock x:Name="SystemEnergyLabelText" Text="累计耗能" FontSize="11"
+                <TextBlock Text="核心累计能耗" FontSize="11"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <TextBlock x:Name="EnergyText" Text="—" FontSize="13" />
+                <TextBlock x:Name="CoreTotalEnergyText" Text="—" FontSize="13" />
             </StackPanel>
         </Grid>
 
@@ -137,7 +156,47 @@
         <Border Background="Transparent" BorderThickness="0" Padding="0,4">
             <ikw:SimpleStackPanel Spacing="7">
                 <Grid>
-                    <TextBlock Text="组件功耗" FontSize="12"
+                    <TextBlock Text="GPU 功耗" FontSize="12"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="读数" FontSize="12"
+                               HorizontalAlignment="Right"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </Grid>
+                <TextBlock Text="GPU 行目前仅读取 NVIDIA NVML；Intel RAPL 图形域如平台提供会列在下方，AMD GPU 功率尚未接入"
+                           FontSize="10"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="NoGpuPowerNotice" Text="未检测到 NVIDIA NVML 功耗读数"
+                           FontSize="11" Visibility="Collapsed"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <ItemsControl x:Name="GpuPowerList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="72" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding Name}"
+                                           FontSize="12" TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding Tooltip}" />
+                                <TextBlock Grid.Column="1" Text="{Binding WattsText}"
+                                           FontSize="12" TextAlignment="Right" />
+                                <TextBlock Grid.Column="2" Text="{Binding StatusText}"
+                                           FontSize="10" Margin="8,0,0,0"
+                                           ToolTip="{Binding Source}"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ikw:SimpleStackPanel>
+        </Border>
+
+        <Border Background="Transparent" BorderThickness="0" Padding="0,4">
+            <ikw:SimpleStackPanel Spacing="7">
+                <Grid>
+                    <TextBlock Text="硬件传感器功率域" FontSize="12"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                     <TextBlock Text="读数" FontSize="12"
                                HorizontalAlignment="Right"
@@ -167,53 +226,6 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
-            </ikw:SimpleStackPanel>
-        </Border>
-
-        <Border Background="Transparent" BorderThickness="0" Padding="0,4">
-            <ikw:SimpleStackPanel Spacing="6">
-                <Grid>
-                    <TextBlock Text="耗电应用排行" FontSize="12"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Text="估算功率" FontSize="12"
-                               HorizontalAlignment="Right"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                </Grid>
-                <TextBlock x:Name="NoProcessesNotice" Text="暂无可用的应用能耗归因数据"
-                           FontSize="11" Visibility="Collapsed"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <local:TouchDragScrollViewer VerticalScrollBarVisibility="Auto" Height="192"
-                                             Style="{DynamicResource {x:Type ScrollViewer}}"
-                                             IsEnableSmoothManipulating="False" PanningMode="None"
-                                             local:ScrollCacheDuringTouch.Enabled="True">
-                    <local:TouchDragScrollViewer.Physics>
-                        <local:SnappyScrollPhysics />
-                    </local:TouchDragScrollViewer.Physics>
-                    <ItemsControl x:Name="ProcessList">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Margin="0,4">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="80" />
-                                    </Grid.ColumnDefinitions>
-                                    <Image Grid.Column="0" Source="{Binding Icon}"
-                                           Width="16" Height="16" VerticalAlignment="Center"
-                                           Margin="0,0,8,0"
-                                           RenderOptions.BitmapScalingMode="HighQuality"
-                                           SnapsToDevicePixels="True" />
-                                    <TextBlock Grid.Column="1" Text="{Binding Name}"
-                                               FontSize="12" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="2" Text="{Binding WattsText}"
-                                               FontSize="12" VerticalAlignment="Center"
-                                               TextAlignment="Right" />
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </local:TouchDragScrollViewer>
             </ikw:SimpleStackPanel>
         </Border>
 

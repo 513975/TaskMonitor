@@ -156,7 +156,7 @@ statement is a comment at the code site named there. Companion: [`settings-plumb
 8. **Acrylic** — FluentWpfCore `UseWindowComposition=True` on every WPF window, never hand-rolled Accent P/Invoke (carve-out: DetailWindow on Win10, §40); the native floating overlay has NO material (§36); the menu host needs `WS_EX_TOOLWINDOW`.
 44. **竖直任务栏与任务栏族无关** — orientation comes ONLY from the target rect's aspect, never `classical`; always use the column grid + tray/top anchor. Thickness selects two-line strip / one-line column / multi-column (`ComputeVerticalLayout` against BAND width, never the rounded window).
 45. **`SetParent` 嵌入任务栏偶发 err=87（跨线程瞬态）** — retry in place (5×250ms), judge by `GetAncestor(GA_PARENT)`, and a failed embed DESTROYS the round (never fall through top-level in parent-relative coords → 屏幕左上角滞留); drain the teardown's WM_QUIT before returning; the tick holds the embed invariant.
-46. **多显示器 = one SamplingController + N overlays** — persist monitor interface IDs, never indices/HWNDs; each selected target has its own STA/RenderState/taskbar and cancellable lifecycle, never its own sampler. DWrite = per-HWND ISOLATED factory rooted in RenderState; failed Start aborts cleanly. Detail data comes from controller, placement from CLICKED overlay; floating stays singleton. Full rules: gotchas §46.
+46. **多屏共用采样器；每屏独立 STA/RenderState，目标用 monitor ID** — gotchas §46。
 47. **Native overlay STAs are PerMonitorV2; resize must reach the HWND** — compare X/Y + width/height; floating derives DPI/height independently of the primary band; docked hide/peek keeps home DPI (real drag/undock follows live); update region in the same pass. Back-buffer-only resize clips the card.
 
 **Samplers / metrics**
@@ -202,7 +202,11 @@ statement is a comment at the code site named there. Companion: [`settings-plumb
 41. **Prewarm 永不抛出，`_stopping` 时跳过；启动时在 mutex 之后清残留 sentinel**。
 42. **经典任务栏(Win10)下覆盖层自画不透明底色** — 被 `WS_CLIPCHILDREN` 冻住的残影擦不掉、只能遮盖（`CardBrush` alpha 恒 1 全幅填充）；底色每 tick 采样 `SampleTaskbarBackdropColor`（3-tick 稳定期）；Win11 保持全透明。
 43. **窗口死后必须退出消息循环；僵尸要自愈** — 裸 `WM_NCDESTROY` 也 teardown+quit；foreign calls 走有界 worker（`SetParent` inline）；entry 清理 worker/trace；watchdog 5s 唤醒、45s 重启。
-48. **UAC/锁屏后 WPF 不渲染 = 多窗口 BitmapCache 缺陷** — 首个窗口前设 `ShadowAssist.UseBitmapCache=false`；触屏临时缓存也走此开关，禁止单独恢复。
+48. **UAC/锁屏后 WPF 停渲染** — 首窗前设 `ShadowAssist.UseBitmapCache=false`；触屏临时缓存服从同一开关。
+49. **RAPL 单域恢复；Package 暂存标记，任务栏隐藏；多 Package 汇总必须完整** — gotchas §49。
+50. **任务栏自动功耗按 AC 在线切换；不看电池放电** — gotchas §50。
+51. **功耗图沿用全宽历史图样式、全曲线填充；核心 Wh 只积完整读数** — gotchas §51。
+52. **任务栏功耗单元按值宽度扩展；绘制与命中共用布局** — gotchas §52。
 
 ## Useful external references
 

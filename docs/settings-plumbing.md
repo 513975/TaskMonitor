@@ -58,6 +58,7 @@ hand-edited all-off config falls back to CPU so the runtime mask is never zero. 
 **separate** from `TaskbarWindow._clickDisabledMask` (pinned-window press suppression) —
 unpinning must never re-enable a sampling-disabled slot. Details, including the re-enable
 baseline priming: [`gotchas.md` §25](gotchas.md#25-per-metric-sampling-switches-use-a-mask-separate-from-the-pinned-window-click-mask).
+The optional NVIDIA GPU-power worker follows the 功耗 sampling switch.
 
 ## 3. 磁盘 / GPU 显示方式 — `DiskDisplay` + `DiskDisplayIndex`, `GpuDisplay` + `GpuDisplayIndex`
 
@@ -270,23 +271,26 @@ layout and hit-testing are unchanged. App writes only the off state (`showSepara
 logs the change. `ConfigureWindow` replays the setting to every new/rebuilt overlay, and the startup
 geometry log includes `分割线=True/False`.
 
-## 14. 任务栏功耗来源 — `PowerTaskbarSource` (null = 电池功耗)
+## 14. 任务栏功耗来源 — `PowerTaskbarSource` (null = 自动)
 
 This is a taskbar rendering preference; it does not change sampling or the power detail page.
 
 | | |
 |---|---|
 | Setter | `App.OnPowerTaskbarSourceChanged` → `TaskbarOverlayManager.SetPowerTaskbarSource` → `TaskbarWindow.SetPowerTaskbarSource` |
-| Window state | `_powerTaskbarSource` (volatile, default `Battery`) |
+| Window state | `_powerTaskbarSource` (volatile, default `Automatic`) |
 | WM_APP | **`WM_APP_SNAPSHOT`** — redraws the current snapshot immediately; geometry is unchanged |
 
-设置 → 采样项目 → 功耗 offers 电池功耗 (default), CPU 封装功耗 and 系统整机功耗. App stores
-only non-default values in `settings.yaml` (`powerTaskbarSource: CpuPackage` or `System`); a missing
-key remains 电池功耗. Every overlay, including newly created or rebuilt displays, receives the
-same setting. The label is always `功耗`; the value comes only from the selected source, showing
-`--` if that source has no reading instead of silently changing the measurement basis. Battery
-charging is prefixed `+`, discharging `-`, and an idle battery shows `0.0W`; the power detail page
-continues to show all sources.
+设置 → 采样项目 → 功耗 offers 自动 (default), 核心总功耗, CPU 封装功耗, and 电池功率. In automatic
+mode, the AC-online field selects core total; only a confirmed AC-offline state with a present,
+discharging battery selects the positive battery-side draw magnitude. Battery discharge alone
+never selects the source, because a plugged-in laptop can supplement AC input from its battery
+under heavy load. Unknown AC state or unavailable source data shows `--`. App stores only explicit
+overrides; a missing key means automatic. Older `System` values migrate to automatic during load.
+Every overlay, including newly created or rebuilt displays, receives the same setting. The label is
+always `功耗`.
+Manual battery mode retains the signed flow presentation: charging is prefixed `+`, discharging
+`-`, and an idle battery shows `0.0W`.
 
 ## Not in settings.yaml at all
 

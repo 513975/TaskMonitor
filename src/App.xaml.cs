@@ -379,7 +379,7 @@ namespace task_monitor
             _sampling.SetGpuDisplay(GpuDisplayModeIndexOf(_config), _config.GpuDisplayIndex ?? 0);
             _taskbars.SetGpuTempDisplay(_config.GpuTaskbarContent ?? GpuTaskbarContent.Usage,
                 _config.GpuTempIndex ?? -1, _config.GpuTempUnit == GpuTempUnit.Fahrenheit);
-            _taskbars.SetPowerTaskbarSource(_config.PowerTaskbarSource ?? PowerTaskbarSource.Battery);
+            _taskbars.SetPowerTaskbarSource(_config.PowerTaskbarSource ?? PowerTaskbarSource.Automatic);
             _sampling.SetNetAdapter(_config.NetAdapterId);
             _sampling.SetClashApi(_config.ClashEnabled != false, _config.ClashApiAddress, _config.ClashApiSecret);
             _sampling.SetPublicIpLookup(_config.PublicIpEnabled != false);
@@ -1039,8 +1039,9 @@ namespace task_monitor
             => c.GpuTempUnit == GpuTempUnit.Fahrenheit ? 1 : 0;
 
         private static int PowerTaskbarSourceIndexOf(AppSettings c)
-            => c.PowerTaskbarSource == PowerTaskbarSource.CpuPackage ? 1
-               : c.PowerTaskbarSource == PowerTaskbarSource.System ? 2 : 0;
+            => c.PowerTaskbarSource == PowerTaskbarSource.CoreTotal ? 1
+                : c.PowerTaskbarSource == PowerTaskbarSource.CpuPackage ? 2
+                : c.PowerTaskbarSource == PowerTaskbarSource.Battery ? 3 : 0;
 
         // 任务栏显示 / 温度来源 / 温度单位 combo changed: persist (the pick ≥0 and the
         // unit are KEPT when the content returns to 使用率, so switching back restores
@@ -1059,16 +1060,15 @@ namespace task_monitor
             _taskbars.SetGpuTempDisplay(content, tempIndex, fahrenheit);
         }
 
-        // 功耗 → 任务栏显示来源: null = 电池功耗（默认），1 = CPU 封装，2 = 系统整机。
-        // This is a rendering choice only; the power sampler and detail page continue to
-        // publish and display all available sources.
+        // 功耗 → 任务栏显示来源: null = 自动（默认），1=核心总功耗 2=CPU Package 3=电池功率。
         private void OnPowerTaskbarSourceChanged(int sourceIndex)
         {
-            _config.PowerTaskbarSource = sourceIndex == 1 ? PowerTaskbarSource.CpuPackage
-                : sourceIndex == 2 ? PowerTaskbarSource.System
+            _config.PowerTaskbarSource = sourceIndex == 1 ? PowerTaskbarSource.CoreTotal
+                : sourceIndex == 2 ? PowerTaskbarSource.CpuPackage
+                : sourceIndex == 3 ? PowerTaskbarSource.Battery
                 : (PowerTaskbarSource?)null;
             TrySaveConfig();
-            _taskbars.SetPowerTaskbarSource(_config.PowerTaskbarSource ?? PowerTaskbarSource.Battery);
+            _taskbars.SetPowerTaskbarSource(_config.PowerTaskbarSource ?? PowerTaskbarSource.Automatic);
         }
 
         // ---------- 设置 → 采样 → 网络: 适配器 ----------

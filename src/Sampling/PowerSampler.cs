@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Threading;
 
 namespace task_monitor
@@ -10,7 +9,7 @@ namespace task_monitor
     {
         Unavailable,
         Measured,
-        Estimated,
+        Stale,
     }
 
     internal enum BatteryFlowState
@@ -29,30 +28,35 @@ namespace task_monitor
         public PowerValueKind Kind { get; set; }
     }
 
-    internal sealed class ProcessPowerReading
+    internal sealed class GpuPowerReading
     {
         public string Name { get; set; }
-        public string ExePath { get; set; }
+        public string DeviceId { get; set; }
         public double? Watts { get; set; }
+        public DateTime SampleTimeUtc { get; set; }
         public PowerValueKind Kind { get; set; }
+        public string Status { get; set; }
+        public string Source { get; set; }
     }
 
     /// <summary>
     /// Detached hardware readings. The sampler reads Windows' built-in Energy Meter
-    /// performance counters (EMI/RAPL) and aggregate battery status API; it never
-    /// depends on another monitoring app.
+    /// performance counters (EMI/RAPL) and aggregate battery status API; NVIDIA GPU
+    /// power is published separately by the optional NVML worker.
     /// </summary>
     internal sealed class PowerSensorFrame
     {
         public double? CpuPackageWatts;
         public string CpuPackageSource;
-        public double? CpuCoreDomainWatts;
-        public double? DirectSystemWatts;
-        public string DirectSystemSource;
-        public bool AcOnLine;
+        public bool CpuPackageStale;
+        public DateTime CpuPackageSampleTimeUtc;
+        public bool? AcOnLine;
+        public bool? BatteryPresent;
         public double? BatteryPowerWatts;
         public BatteryFlowState BatteryState;
         public string BatterySource;
+        public DateTime SampleTimeUtc;
+        public long SampleTimestamp;
         public List<PowerComponentReading> Components = new List<PowerComponentReading>();
         public string AvailabilityMessage = "等待 Windows 硬件功率传感器";
 
@@ -64,16 +68,15 @@ namespace task_monitor
 
     internal sealed class PowerSnapshot
     {
-        public double? SystemWatts;
-        public PowerValueKind SystemKind;
-        public string SystemSource = "";
         public double? CpuPackageWatts;
         public PowerValueKind CpuPackageKind;
+        public string CpuPackageSource = "";
+        public DateTime CpuPackageSampleTimeUtc;
+        public DateTime SampleTimeUtc;
+        public bool? AcOnLine;
+        public bool? BatteryPresent;
+        public double? CpuPackagePeakWatts; // max of the most recent 60 published power samples
         public string AvailabilityMessage = "";
-        public double? SystemAverageWatts;
-        public double? SystemPeakWatts;
-        public double? SystemEnergyWh;
-        public double?[] SystemHistory = Array.Empty<double?>();
         public double?[] CpuPackageHistory = Array.Empty<double?>();
         public double? BatteryPowerWatts;
         public BatteryFlowState BatteryState;
@@ -84,27 +87,30 @@ namespace task_monitor
         public double?[] BatteryHistory = Array.Empty<double?>();
         public double?[] BatteryChargeHistory = Array.Empty<double?>();
         public double?[] BatteryDischargeHistory = Array.Empty<double?>();
-        public double?[] CoreWatts = Array.Empty<double?>();
-        public PowerValueKind[] CoreKinds = Array.Empty<PowerValueKind>();
         public List<PowerComponentReading> Components = new List<PowerComponentReading>();
-        public List<ProcessPowerReading> TopProcesses = new List<ProcessPowerReading>();
+        public GpuPowerReading[] GpuPowerReadings = Array.Empty<GpuPowerReading>();
+        public double? GpuPowerWatts;
+        public double? GpuPowerPeakWatts; // max of the complete NVML aggregate's 60-sample window
+        public double? CoreTotalWatts;
+        public double? CoreTotalEnergyWh; // session cumulative Wh, trapezoid-integrated while CoreTotal is valid
+        public double?[] GpuPowerHistory = Array.Empty<double?>();
+        public string GpuPowerAvailability = "等待 NVIDIA NVML 功耗数据";
 
         public static readonly PowerSnapshot Empty = new PowerSnapshot();
     }
 
     /// <summary>
-    /// Reads Windows Energy Meter / RAPL counters and the OS aggregate battery rate.
-    /// On Intel systems, Windows publishes RAPL domains in milliwatts. The Power Meter
-    /// total is used only when Windows reports a nonzero system-wide meter. If that is
-    /// unavailable, battery discharge is exposed as an estimated battery-side whole-system
-    /// value. While AC is offline, that battery value takes priority even if a system-wide
-    /// meter is also present. CPU package power is never substituted for total system power.
+    /// Reads Windows Energy Meter / RAPL counters and the OS battery rate.
+    /// Counter inventory and per-domain recovery invariants: docs/gotchas.md §49.
+    /// On Intel systems, Windows publishes RAPL domains in milliwatts. Battery rate remains
+    /// a battery-side flow and is never substituted for CPU or system power.
     /// </summary>
     internal sealed class HardwarePowerSensorSampler
     {
         private const int PollIntervalMs = 1000;
         private const int RetryIntervalMs = 10000;
         private const int StopJoinMs = 1500;
+        private const int ReenumerateEveryTicks = 60;
         private const double MaxPowerWatts = 2000;
 
         private readonly AutoResetEvent _wake = new AutoResetEvent(false);
@@ -114,8 +120,8 @@ namespace task_monitor
         private volatile bool _enabled;
         private string _lastStatus;
         private long _retryAfter;
+        private int _ticksSinceEnumerate;
         private readonly List<RaplCounter> _raplCounters = new List<RaplCounter>();
-        private PerformanceCounter _systemPowerCounter;
 
         public PowerSensorFrame Latest => Volatile.Read(ref _latest);
 
@@ -155,19 +161,30 @@ namespace task_monitor
                     PowerSensorFrame frame;
                     try
                     {
-                        if (_raplCounters.Count == 0 && _systemPowerCounter == null
-                            && Stopwatch.GetTimestamp() >= _retryAfter)
+                        if (_raplCounters.Count == 0)
+                        {
+                            if (Stopwatch.GetTimestamp() >= _retryAfter)
+                                OpenCounters();
+                        }
+                        else if (++_ticksSinceEnumerate >= ReenumerateEveryTicks)
+                        {
+                            // Counter instances can change after sleep/resume, firmware
+                            // transitions, or a provider restart. Re-scan off the UI/sampler
+                            // thread at a low cadence so a surviving stale counter does not
+                            // suppress discovery of newly available RAPL domains.
                             OpenCounters();
+                        }
 
                         frame = ReadFrame();
                     }
                     catch (Exception ex)
                     {
-                        ReleaseCounters();
-                        _retryAfter = Stopwatch.GetTimestamp()
-                            + (long)(RetryIntervalMs / 1000.0 * Stopwatch.Frequency);
-                        frame = FailedFrame("Windows Energy Meter 读取失败");
-                        LogTransition(frame.AvailabilityMessage, "读取 Windows 硬件功率传感器失败", ex);
+                        if (_raplCounters.Count == 0)
+                            _retryAfter = Stopwatch.GetTimestamp()
+                                + (long)(RetryIntervalMs / 1000.0 * Stopwatch.Frequency);
+                        frame = FailedFrame("硬件功率传感器暂时读取失败");
+                        Logger.WarnOnce("hardware-power-frame-read",
+                            "硬件功率采样帧读取失败；保留现有 RAPL 句柄并继续重试", ex);
                     }
 
                     Publish(frame);
@@ -188,60 +205,96 @@ namespace task_monitor
 
         private void OpenCounters()
         {
-            ReleaseCounters();
+            _ticksSinceEnumerate = 0;
             try
             {
+                var desiredInstances = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (PerformanceCounterCategory.Exists("Energy Meter"))
                 {
                     var energyCategory = new PerformanceCounterCategory("Energy Meter");
                     foreach (string instance in energyCategory.GetInstanceNames())
-                    {
-                        if (!TryParseRaplInstance(instance, out string domain)) continue;
-
-                        PerformanceCounter counter = null;
-                        try
-                        {
-                            counter = new PerformanceCounter("Energy Meter", "Power", instance, true);
-                            // Prime the counter's interval baseline; its first NextValue is expected
-                            // to be zero, and the following sample contains the current mW value.
-                            counter.NextValue();
-                            _raplCounters.Add(new RaplCounter(domain, counter));
-                            counter = null;
-                        }
-                        finally
-                        {
-                            counter?.Dispose();
-                        }
-                    }
+                        if (TryParseRaplInstance(instance, out _))
+                            desiredInstances.Add(instance);
                 }
-            }
-            catch (InvalidOperationException)
-            {
-                // A machine without the Windows Energy Meter provider can still expose
-                // the separate system-level Power Meter category below.
-            }
-            catch (System.ComponentModel.Win32Exception)
-            {
-                // Counter registration is machine-specific; keep the sampler alive.
-            }
-            try
-            {
-                if (PerformanceCounterCategory.Exists("Power Meter")
-                    && PerformanceCounterCategory.InstanceExists("_Total", "Power Meter"))
+
+                if (desiredInstances.Count == 0 && _raplCounters.Count > 0)
                 {
-                    _systemPowerCounter = new PerformanceCounter("Power Meter", "Power", "_Total", true);
-                    _systemPowerCounter.NextValue();
+                    // A transient empty inventory must not tear down working handles.
+                    // Existing counters will still fail and retry independently if the
+                    // provider was genuinely removed.
+                    return;
+                }
+
+                // Keep live handles when the instance inventory is unchanged. Reopening
+                // every counter during a routine scan resets rate-counter baselines and
+                // can make CPU Package disappear for a sample.
+                for (int i = _raplCounters.Count - 1; i >= 0; i--)
+                {
+                    RaplCounter current = _raplCounters[i];
+                    if (desiredInstances.Contains(current.InstanceName)) continue;
+                    current.Counter?.Dispose();
+                    _raplCounters.RemoveAt(i);
+                }
+
+                foreach (string instance in desiredInstances)
+                {
+                    bool alreadyOpen = false;
+                    foreach (RaplCounter current in _raplCounters)
+                    {
+                        if (!string.Equals(current.InstanceName, instance, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        alreadyOpen = true;
+                        break;
+                    }
+                    if (alreadyOpen || !TryParseRaplInstance(instance, out string domain))
+                        continue;
+
+                    var sensor = new RaplCounter(instance, domain);
+                    _raplCounters.Add(sensor);
+                    TryOpenCounter(sensor);
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                _systemPowerCounter?.Dispose();
-                _systemPowerCounter = null;
+                // Counter-category inventory can be unavailable while Windows refreshes
+                // providers. Preserve existing readers and retry on the next low-rate scan.
+                LogTransition("Windows Energy Meter 实例枚举暂时失败",
+                    "枚举 Windows Energy Meter 实例失败", ex);
             }
-
-            if (_raplCounters.Count == 0 && _systemPowerCounter == null)
+            if (_raplCounters.Count == 0)
                 _retryAfter = Stopwatch.GetTimestamp()
                     + (long)(RetryIntervalMs / 1000.0 * Stopwatch.Frequency);
+        }
+
+        private static bool TryOpenCounter(RaplCounter sensor)
+        {
+            PerformanceCounter counter = null;
+            try
+            {
+                counter = new PerformanceCounter("Energy Meter", "Power", sensor.InstanceName, true);
+                // Prime the interval baseline; the actual value is read on a later tick
+                // after a full sampling interval.
+                counter.NextValue();
+                sensor.Counter?.Dispose();
+                sensor.Counter = counter;
+                sensor.NeedsPrime = true;
+                sensor.InvalidSamples = 0;
+                sensor.RetryAfter = 0;
+                counter = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                sensor.RetryAfter = Stopwatch.GetTimestamp()
+                    + (long)(2000 / 1000.0 * Stopwatch.Frequency);
+                Logger.WarnOnce("rapl-open-" + sensor.InstanceName,
+                    "打开 RAPL 功率计数器失败，将自动重试：" + sensor.InstanceName, ex);
+                return false;
+            }
+            finally
+            {
+                counter?.Dispose();
+            }
         }
 
         private PowerSensorFrame ReadFrame()
@@ -249,26 +302,24 @@ namespace task_monitor
             var frame = new PowerSensorFrame();
             var domainValues = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
             double packageTotal = 0;
-            bool hasPackage = false;
-            double coreDomainTotal = 0;
-            bool hasCoreDomain = false;
-
+            int packageCount = 0;
+            int packageReadCount = 0;
             foreach (RaplCounter sensor in _raplCounters)
             {
-                double? watts = ReadCounterWatts(sensor.Counter);
+                bool isPackage = string.Equals(sensor.Domain, "PKG", StringComparison.OrdinalIgnoreCase);
+                if (isPackage)
+                    packageCount++;
+                double? watts = ReadCounterWatts(sensor, isPackage, out bool stale);
                 if (!watts.HasValue) continue;
 
-                if (string.Equals(sensor.Domain, "PKG", StringComparison.OrdinalIgnoreCase))
+                if (isPackage)
                 {
                     packageTotal += watts.Value;
-                    hasPackage = true;
+                    packageReadCount++;
+                    frame.CpuPackageStale |= stale;
+                    if (sensor.LastGoodSampleTimeUtc > frame.CpuPackageSampleTimeUtc)
+                        frame.CpuPackageSampleTimeUtc = sensor.LastGoodSampleTimeUtc;
                     continue;
-                }
-
-                if (string.Equals(sensor.Domain, "PP0", StringComparison.OrdinalIgnoreCase))
-                {
-                    coreDomainTotal += watts.Value;
-                    hasCoreDomain = true;
                 }
 
                 string domainKey = sensor.Domain.ToUpperInvariant();
@@ -276,16 +327,14 @@ namespace task_monitor
                     + watts.Value;
             }
 
-            if (hasPackage)
+            // A multi-socket machine must publish a package total only when every
+            // package instance contributed. A partial sum would under-report CPU
+            // power and could contaminate peaks or core-energy integration.
+            if (packageCount > 0 && packageReadCount == packageCount)
             {
                 frame.CpuPackageWatts = packageTotal;
                 frame.CpuPackageSource = "Windows Energy Meter / Intel RAPL Package";
-                frame.Components.Add(MeasuredComponent("CPU 封装（RAPL Package）", packageTotal,
-                    frame.CpuPackageSource));
             }
-
-            if (hasCoreDomain)
-                frame.CpuCoreDomainWatts = coreDomainTotal;
 
             foreach (KeyValuePair<string, double> domain in domainValues)
             {
@@ -294,16 +343,17 @@ namespace task_monitor
                     "Windows Energy Meter / Intel RAPL " + domain.Key));
             }
 
-            double? systemMeter = ReadCounterWatts(_systemPowerCounter);
-            if (systemMeter.HasValue)
+            try
             {
-                frame.DirectSystemWatts = systemMeter.Value;
-                frame.DirectSystemSource = "Windows Power Meter / 系统级功率计";
-                frame.Components.Insert(0, MeasuredComponent("系统级功率计", systemMeter.Value,
-                    frame.DirectSystemSource));
+                ReadBattery(frame);
             }
-
-            ReadBattery(frame);
+            catch (Exception ex)
+            {
+                // Battery API failures are independent from RAPL; do not invalidate CPU
+                // counters because the platform battery provider failed this sample.
+                Logger.WarnOnce("battery-power-read",
+                    "读取 Windows 电池功率失败；CPU RAPL 采样继续", ex);
+            }
             UpdateAvailability(frame);
             return frame;
         }
@@ -313,7 +363,13 @@ namespace task_monitor
             if (!BatteryPowerInterop.TryRead(out BatteryPowerInterop.State battery))
                 return;
 
-            frame.AcOnLine = battery.AcOnLine != 0;
+            // Only successful API output is authoritative. The native struct is
+            // zero-initialized before the call, so never infer offline from a default
+            // value when TryRead failed.
+            if (battery.AcOnLine <= 1)
+                frame.AcOnLine = battery.AcOnLine != 0;
+            frame.BatteryPresent = battery.BatteryPresent != 0;
+
             if (battery.BatteryPresent == 0)
             {
                 frame.BatterySource = "Windows Battery API · 未检测到电池";
@@ -360,56 +416,18 @@ namespace task_monitor
                 return;
 
             frame.BatteryPowerWatts = watts;
-            string flow = isCharging ? "充电" : "放电";
-            frame.Components.Add(MeasuredComponent("电池" + flow + "功率", watts,
-                frame.BatterySource));
         }
 
         private static void UpdateAvailability(PowerSensorFrame frame)
         {
-            if (!frame.AcOnLine
-                && frame.BatteryState == BatteryFlowState.Discharging
-                && frame.BatteryPowerWatts.HasValue)
-            {
-                frame.AvailabilityMessage = frame.DirectSystemWatts.HasValue
-                    ? "当前由电池供电；整机读数采用电池放电功率估算，系统级功率计作为组件读数保留。"
-                    : "系统级功率计不可用；当前整机读数采用电池放电功率，表示电池端输出估算。";
-                return;
-            }
-
-            if (frame.DirectSystemWatts.HasValue && frame.CpuPackageWatts.HasValue)
-            {
-                frame.AvailabilityMessage = "已读取 Windows 系统级功率计与 CPU 封装传感器。";
-                return;
-            }
-
-            if (frame.BatteryState == BatteryFlowState.Charging && frame.BatteryPowerWatts.HasValue)
-            {
-                frame.AvailabilityMessage = frame.DirectSystemWatts.HasValue
-                    ? "已读取系统级功率计与电池充电功率；充电功率不等于整机耗电。"
-                    : "已读取电池充电功率；充电功率不等于整机耗电，当前整机功率计不可用。";
-                return;
-            }
-
-            if (frame.BatteryState == BatteryFlowState.Idle)
-            {
-                frame.AvailabilityMessage = "电池当前没有充放电；电池端数据无法提供整机功耗。";
-                return;
-            }
-
-            if (frame.CpuPackageWatts.HasValue)
-            {
-                frame.AvailabilityMessage = "已读取 Windows Energy Meter / Intel RAPL CPU 封装功率；系统级与电池功率当前不可用。";
-                return;
-            }
-
-            if (frame.DirectSystemWatts.HasValue)
-            {
-                frame.AvailabilityMessage = "已读取 Windows 系统级功率计；CPU 封装和电池功率当前不可用。";
-                return;
-            }
-
-            frame.AvailabilityMessage = "Windows 未提供有效的系统级、电池或 CPU RAPL 功率读数。";
+            if (frame.CpuPackageWatts.HasValue && frame.BatteryPowerWatts.HasValue)
+                frame.AvailabilityMessage = "已读取 CPU 封装功率与电池充放电功率。";
+            else if (frame.CpuPackageWatts.HasValue)
+                frame.AvailabilityMessage = "已读取 CPU 封装功率；当前没有可用的电池功率读数。";
+            else if (frame.BatteryPowerWatts.HasValue || frame.BatteryState != BatteryFlowState.Unavailable)
+                frame.AvailabilityMessage = "当前没有可用的 CPU 封装功率；电池读数仅表示电池充放电功率。";
+            else
+                frame.AvailabilityMessage = "Windows 未提供有效的 CPU RAPL 封装或电池功率读数。";
         }
 
         private static bool TryParseRaplInstance(string instance, out string domain)
@@ -428,16 +446,70 @@ namespace task_monitor
             return domain.Length > 0;
         }
 
-        private static double? ReadCounterWatts(PerformanceCounter counter)
+        private double? ReadCounterWatts(RaplCounter sensor, bool allowRecentValue, out bool stale)
         {
-            if (counter == null) return null;
+            stale = false;
+            if (sensor.Counter == null)
+            {
+                if (Stopwatch.GetTimestamp() >= sensor.RetryAfter && TryOpenCounter(sensor))
+                {
+                    // This call happened during the current tick. The next scheduled sample
+                    // will arrive after the required baseline interval.
+                    sensor.NeedsPrime = false;
+                }
+                return allowRecentValue ? RecentValue(sensor, out stale) : (double?)null;
+            }
 
-            float milliwatts = counter.NextValue();
+            if (sensor.NeedsPrime)
+            {
+                sensor.NeedsPrime = false;
+                return allowRecentValue ? RecentValue(sensor, out stale) : (double?)null;
+            }
+
+            float milliwatts;
+            try
+            {
+                milliwatts = sensor.Counter.NextValue();
+            }
+            catch (Exception ex)
+            {
+                InvalidateCounter(sensor, ex);
+                return allowRecentValue ? RecentValue(sensor, out stale) : (double?)null;
+            }
+
             if (float.IsNaN(milliwatts) || float.IsInfinity(milliwatts)
                 || milliwatts <= 0 || milliwatts > MaxPowerWatts * 1000)
-                return null;
+            {
+                if (++sensor.InvalidSamples >= 3)
+                    InvalidateCounter(sensor, null);
+                return allowRecentValue ? RecentValue(sensor, out stale) : (double?)null;
+            }
 
-            return milliwatts / 1000.0;
+            sensor.InvalidSamples = 0;
+            sensor.LastGoodWatts = milliwatts / 1000.0;
+            sensor.LastGoodTimestamp = Stopwatch.GetTimestamp();
+            sensor.LastGoodSampleTimeUtc = DateTime.UtcNow;
+            return sensor.LastGoodWatts;
+        }
+
+        private static double? RecentValue(RaplCounter sensor, out bool stale)
+        {
+            stale = sensor.LastGoodWatts.HasValue && sensor.LastGoodTimestamp > 0
+                && Stopwatch.GetTimestamp() - sensor.LastGoodTimestamp
+                    <= 3L * Stopwatch.Frequency;
+            return stale ? sensor.LastGoodWatts : (double?)null;
+        }
+
+        private static void InvalidateCounter(RaplCounter sensor, Exception exception)
+        {
+            sensor.Counter?.Dispose();
+            sensor.Counter = null;
+            sensor.NeedsPrime = false;
+            sensor.InvalidSamples = 0;
+            sensor.RetryAfter = Stopwatch.GetTimestamp()
+                + (long)(2000 / 1000.0 * Stopwatch.Frequency);
+            Logger.WarnOnce("rapl-read-" + sensor.InstanceName,
+                "RAPL 功率计数器读取失败，将单独重连：" + sensor.InstanceName, exception);
         }
 
         private static PowerComponentReading MeasuredComponent(string name, double watts, string source)
@@ -462,6 +534,11 @@ namespace task_monitor
 
         private void Publish(PowerSensorFrame frame)
         {
+            if (!ReferenceEquals(frame, PowerSensorFrame.Empty))
+            {
+                frame.SampleTimeUtc = DateTime.UtcNow;
+                frame.SampleTimestamp = Stopwatch.GetTimestamp();
+            }
             LogTransition(frame.AvailabilityMessage, null, null);
             Volatile.Write(ref _latest, frame);
         }
@@ -482,19 +559,24 @@ namespace task_monitor
             foreach (RaplCounter sensor in _raplCounters)
                 sensor.Counter?.Dispose();
             _raplCounters.Clear();
-            _systemPowerCounter?.Dispose();
-            _systemPowerCounter = null;
         }
 
         private sealed class RaplCounter
         {
+            public readonly string InstanceName;
             public readonly string Domain;
-            public readonly PerformanceCounter Counter;
+            public PerformanceCounter Counter;
+            public bool NeedsPrime;
+            public int InvalidSamples;
+            public long RetryAfter;
+            public double? LastGoodWatts;
+            public long LastGoodTimestamp;
+            public DateTime LastGoodSampleTimeUtc;
 
-            public RaplCounter(string domain, PerformanceCounter counter)
+            public RaplCounter(string instanceName, string domain)
             {
+                InstanceName = instanceName;
                 Domain = domain;
-                Counter = counter;
             }
         }
 
@@ -516,18 +598,17 @@ namespace task_monitor
     internal sealed class PowerSampler
     {
         private const int HistoryCapacity = 60;
+        // Rolling peak windows and CoreTotal integration/gap semantics: docs/gotchas.md §51.
         private readonly HardwarePowerSensorSampler _sensor = new HardwarePowerSensorSampler();
-        private readonly Queue<double?> _systemHistory = new Queue<double?>(HistoryCapacity);
+        private readonly NvmlGpuPowerSampler _gpuSensor = new NvmlGpuPowerSampler();
         private readonly Queue<double?> _packageHistory = new Queue<double?>(HistoryCapacity);
         private readonly Queue<double?> _batteryHistory = new Queue<double?>(HistoryCapacity);
         private readonly Queue<double?> _batteryChargeHistory = new Queue<double?>(HistoryCapacity);
         private readonly Queue<double?> _batteryDischargeHistory = new Queue<double?>(HistoryCapacity);
-        private PowerValueKind? _lastSystemKind;
-        private string _lastSystemSource;
-        private double? _energyWh;
-        private double _peak;
-        private double? _lastSystemWatts;
-        private long _lastSampleTimestamp;
+        private readonly Queue<double?> _gpuPowerHistory = new Queue<double?>(HistoryCapacity);
+        private double? _coreTotalEnergyWh;
+        private double? _lastCoreTotalWatts;
+        private long _lastCoreTotalTimestamp;
         private BatteryFlowState? _lastBatteryState;
         private double? _batteryEnergyWh;
         private double _batteryPeak;
@@ -535,82 +616,70 @@ namespace task_monitor
         private long _lastBatteryTimestamp;
 
         public void SetEnabled(bool enabled) => _sensor.SetEnabled(enabled);
+        public void SetGpuEnabled(bool enabled) => _gpuSensor.SetEnabled(enabled);
 
-        /// <summary>Breaks the energy integration interval after sampling was paused.</summary>
+        /// <summary>
+        /// Breaks integration baselines and clears rolling display windows after power
+        /// sampling was paused; accumulated core energy remains session cumulative.
+        /// </summary>
         public void ResetEnergyBaseline()
         {
-            _lastSystemWatts = null;
-            _lastSampleTimestamp = 0;
+            _lastCoreTotalWatts = null;
+            _lastCoreTotalTimestamp = 0;
             _lastBatteryWatts = null;
             _lastBatteryTimestamp = 0;
+            _lastBatteryState = null;
+            _batteryPeak = 0;
+            _packageHistory.Clear();
+            _gpuPowerHistory.Clear();
+            _batteryHistory.Clear();
+            _batteryChargeHistory.Clear();
+            _batteryDischargeHistory.Clear();
         }
 
-        public PowerSnapshot Sample(double[] perCoreUsage, List<ProcessInfo> topProcesses)
+        public PowerSnapshot Sample(List<GpuInfo> gpuTopology)
         {
             long now = Stopwatch.GetTimestamp();
             PowerSensorFrame frame = _sensor.Latest ?? PowerSensorFrame.Empty;
-            double? package = frame.CpuPackageWatts;
-            double? system = frame.DirectSystemWatts;
-            PowerValueKind systemKind = system.HasValue ? PowerValueKind.Measured : PowerValueKind.Unavailable;
-            string systemSource = frame.DirectSystemSource ?? "";
+            NvmlGpuPowerFrame gpuFrame = _gpuSensor.Latest ?? NvmlGpuPowerFrame.Empty;
+            bool sensorFresh = IsFresh(frame.SampleTimestamp, now);
+            double? package = sensorFresh ? frame.CpuPackageWatts : (double?)null;
+            BatteryFlowState batteryState = sensorFresh ? frame.BatteryState : BatteryFlowState.Unavailable;
+            double? batteryWatts = sensorFresh ? frame.BatteryPowerWatts : (double?)null;
 
-            if (!frame.AcOnLine
-                && frame.BatteryState == BatteryFlowState.Discharging
-                && frame.BatteryPowerWatts.HasValue)
-            {
-                system = frame.BatteryPowerWatts;
-                systemKind = PowerValueKind.Estimated;
-                systemSource = "Windows Battery API · 电池端放电功率估算";
-            }
+            var components = sensorFresh
+                ? new List<PowerComponentReading>(frame.Components)
+                : new List<PowerComponentReading>();
+            bool packageMeasured = package.HasValue && sensorFresh && !frame.CpuPackageStale;
+            bool gpuFresh = IsGpuFrameFresh(gpuFrame, now);
+            GpuPowerReading[] gpuReadings = gpuFresh
+                ? GetFreshGpuReadings(gpuFrame, now)
+                : Array.Empty<GpuPowerReading>();
+            double? gpuWatts = SumMeasuredGpuPower(gpuReadings);
+            AddHistory(_gpuPowerHistory, gpuWatts);
+            AddHistory(_packageHistory, packageMeasured ? package : (double?)null);
 
-            var components = new List<PowerComponentReading>(frame.Components);
-
-            // Do not combine unlike sources in one rolling average or energy interval.
-            if (_lastSystemKind.HasValue
-                && (_lastSystemKind.Value != systemKind
-                    || !string.Equals(_lastSystemSource, systemSource, StringComparison.Ordinal)))
-            {
-                _systemHistory.Clear();
-                _energyWh = null;
-                _peak = 0;
-                ResetEnergyBaseline();
-            }
-            _lastSystemKind = systemKind;
-            _lastSystemSource = systemSource;
-
-            AddHistory(_systemHistory, system);
-            AddHistory(_packageHistory, package);
-            if (system.HasValue && _lastSystemWatts.HasValue && _lastSampleTimestamp != 0)
-            {
-                double elapsedSeconds = (now - _lastSampleTimestamp) / (double)Stopwatch.Frequency;
-                if (elapsedSeconds > 0 && elapsedSeconds <= 30)
-                    _energyWh = (_energyWh ?? 0) + ((_lastSystemWatts.Value + system.Value) / 2.0) * elapsedSeconds / 3600.0;
-            }
-            if (system.HasValue) _peak = Math.Max(_peak, system.Value);
-            _lastSystemWatts = system;
-            _lastSampleTimestamp = now;
-
-            if (!_lastBatteryState.HasValue || _lastBatteryState.Value != frame.BatteryState)
+            if (!_lastBatteryState.HasValue || _lastBatteryState.Value != batteryState)
             {
                 _batteryEnergyWh = null;
                 _batteryPeak = 0;
                 _lastBatteryWatts = null;
                 _lastBatteryTimestamp = 0;
             }
-            _lastBatteryState = frame.BatteryState;
-            double? batteryFlowWatts = frame.BatteryState == BatteryFlowState.Charging
-                ? -frame.BatteryPowerWatts
-                : frame.BatteryState == BatteryFlowState.Discharging
-                    ? frame.BatteryPowerWatts
-                    : frame.BatteryState == BatteryFlowState.Idle
+            _lastBatteryState = batteryState;
+            double? batteryFlowWatts = batteryState == BatteryFlowState.Charging
+                ? -batteryWatts
+                : batteryState == BatteryFlowState.Discharging
+                    ? batteryWatts
+                    : batteryState == BatteryFlowState.Idle
                         ? 0.0
                         : (double?)null;
             AddHistory(_batteryHistory, batteryFlowWatts);
-            AddHistory(_batteryChargeHistory, frame.BatteryState == BatteryFlowState.Charging
-                ? frame.BatteryPowerWatts : (double?)null);
-            AddHistory(_batteryDischargeHistory, frame.BatteryState == BatteryFlowState.Discharging
-                ? frame.BatteryPowerWatts : (double?)null);
-            if (batteryFlowWatts.HasValue && frame.BatteryState != BatteryFlowState.Idle)
+            AddHistory(_batteryChargeHistory, batteryState == BatteryFlowState.Charging
+                ? batteryWatts : (double?)null);
+            AddHistory(_batteryDischargeHistory, batteryState == BatteryFlowState.Discharging
+                ? batteryWatts : (double?)null);
+            if (batteryFlowWatts.HasValue && batteryState != BatteryFlowState.Idle)
             {
                 _batteryPeak = Math.Max(_batteryPeak, Math.Abs(batteryFlowWatts.Value));
                 if (_lastBatteryWatts.HasValue && _lastBatteryTimestamp != 0)
@@ -630,61 +699,25 @@ namespace task_monitor
                 _lastBatteryTimestamp = 0;
             }
 
-            double[] usages = perCoreUsage ?? Array.Empty<double>();
-            var coreWatts = new double?[usages.Length];
-            var coreKinds = new PowerValueKind[usages.Length];
-            double totalUsage = usages.Sum(value => Math.Max(0, value));
-            for (int i = 0; i < usages.Length; i++)
+            var snapshot = new PowerSnapshot
             {
-                double? coreDomain = frame.CpuCoreDomainWatts ?? package;
-                if (coreDomain.HasValue)
-                {
-                    double weight = totalUsage > 0 ? Math.Max(0, usages[i]) / totalUsage : 1.0 / usages.Length;
-                    coreWatts[i] = coreDomain.Value * weight;
-                    coreKinds[i] = PowerValueKind.Estimated;
-                }
-                else
-                {
-                    coreKinds[i] = PowerValueKind.Unavailable;
-                }
-            }
-
-            var processRows = new List<ProcessPowerReading>();
-            if (package.HasValue && topProcesses != null)
-            {
-                foreach (ProcessInfo process in topProcesses)
-                {
-                    double watts = Math.Max(0, package.Value) * Math.Max(0, process.CpuPercent) / 100.0;
-                    processRows.Add(new ProcessPowerReading
-                    {
-                        Name = process.Name,
-                        ExePath = process.ExePath,
-                        Watts = watts,
-                        Kind = PowerValueKind.Estimated,
-                    });
-                }
-                processRows = processRows.OrderByDescending(p => p.Watts ?? 0).Take(8).ToList();
-            }
-
-            return new PowerSnapshot
-            {
-                SystemWatts = system,
-                SystemKind = systemKind,
-                SystemSource = systemSource,
                 CpuPackageWatts = package,
-                CpuPackageKind = package.HasValue ? PowerValueKind.Measured : PowerValueKind.Unavailable,
-                AvailabilityMessage = frame.AvailabilityMessage,
-                SystemAverageWatts = Average(_systemHistory),
-                SystemPeakWatts = _peak > 0 ? _peak : (double?)null,
-                SystemEnergyWh = _energyWh,
-                SystemHistory = _systemHistory.ToArray(),
+                CpuPackageKind = !package.HasValue ? PowerValueKind.Unavailable
+                    : frame.CpuPackageStale ? PowerValueKind.Stale : PowerValueKind.Measured,
+                CpuPackageSource = sensorFresh ? frame.CpuPackageSource ?? "" : "",
+                CpuPackageSampleTimeUtc = sensorFresh ? frame.CpuPackageSampleTimeUtc : default(DateTime),
+                SampleTimeUtc = sensorFresh ? frame.SampleTimeUtc : default(DateTime),
+                CpuPackagePeakWatts = Maximum(_packageHistory),
+                AvailabilityMessage = sensorFresh ? frame.AvailabilityMessage : "硬件功率读数已过期或不可用。",
                 CpuPackageHistory = _packageHistory.ToArray(),
-                BatteryPowerWatts = frame.BatteryPowerWatts,
-                BatteryState = frame.BatteryState,
-                BatterySource = frame.BatterySource ?? "",
-                BatteryAverageWatts = frame.BatteryState == BatteryFlowState.Charging
+                AcOnLine = sensorFresh ? frame.AcOnLine : (bool?)null,
+                BatteryPresent = sensorFresh ? frame.BatteryPresent : (bool?)null,
+                BatteryPowerWatts = batteryWatts,
+                BatteryState = batteryState,
+                BatterySource = sensorFresh ? frame.BatterySource ?? "" : "",
+                BatteryAverageWatts = batteryState == BatteryFlowState.Charging
                     ? Average(_batteryChargeHistory)
-                    : frame.BatteryState == BatteryFlowState.Discharging
+                    : batteryState == BatteryFlowState.Discharging
                         ? Average(_batteryDischargeHistory)
                         : (double?)null,
                 BatteryPeakWatts = _batteryPeak > 0 ? _batteryPeak : (double?)null,
@@ -692,14 +725,140 @@ namespace task_monitor
                 BatteryHistory = _batteryHistory.ToArray(),
                 BatteryChargeHistory = _batteryChargeHistory.ToArray(),
                 BatteryDischargeHistory = _batteryDischargeHistory.ToArray(),
-                CoreWatts = coreWatts,
-                CoreKinds = coreKinds,
                 Components = components,
-                TopProcesses = processRows,
+                GpuPowerReadings = gpuReadings,
+                GpuPowerWatts = gpuWatts,
+                GpuPowerPeakWatts = Maximum(_gpuPowerHistory),
+                GpuPowerHistory = _gpuPowerHistory.ToArray(),
+                GpuPowerAvailability = gpuFresh
+                    ? gpuFrame.AvailabilityMessage
+                    : "NVIDIA NVML 功耗读数已过期或不可用",
             };
+            ApplyGpuTopology(snapshot, gpuTopology);
+
+            double? coreTotal = snapshot.CoreTotalWatts;
+            if (coreTotal.HasValue && snapshot.CpuPackageKind == PowerValueKind.Measured)
+            {
+                if (_lastCoreTotalWatts.HasValue && _lastCoreTotalTimestamp != 0)
+                {
+                    double elapsedSeconds = (now - _lastCoreTotalTimestamp) / (double)Stopwatch.Frequency;
+                    if (elapsedSeconds > 0 && elapsedSeconds <= 30)
+                        _coreTotalEnergyWh = (_coreTotalEnergyWh ?? 0)
+                            + ((_lastCoreTotalWatts.Value + coreTotal.Value) / 2.0)
+                                * elapsedSeconds / 3600.0;
+                }
+                _lastCoreTotalWatts = coreTotal;
+                _lastCoreTotalTimestamp = now;
+            }
+            else
+            {
+                // Preserve the accumulated value, but never bridge missing, stale or
+                // incomplete sources with an assumed constant core power.
+                _lastCoreTotalWatts = null;
+                _lastCoreTotalTimestamp = 0;
+            }
+            snapshot.CoreTotalEnergyWh = _coreTotalEnergyWh;
+            return snapshot;
         }
 
-        public bool Shutdown() => _sensor.Shutdown();
+        /// <summary>
+        /// Derives CPU+GPU core power only when DXCore topology proves that every
+        /// discrete adapter has a corresponding fresh NVML reading. On an iGPU-only
+        /// Intel system, RAPL Package already contains the integrated GPU domain.
+        /// </summary>
+        private static void ApplyGpuTopology(PowerSnapshot power, List<GpuInfo> gpus)
+        {
+            if (power == null || power.CpuPackageKind != PowerValueKind.Measured
+                || !power.CpuPackageWatts.HasValue || gpus == null || gpus.Count == 0)
+                return;
+
+            var discreteAdapters = new Dictionary<long, string>();
+            foreach (GpuInfo gpu in gpus)
+            {
+                if (gpu == null || !gpu.IsIntegrated.HasValue)
+                    return;
+                if (!gpu.IsIntegrated.Value)
+                    discreteAdapters[gpu.AdapterKey] = gpu.Name;
+            }
+
+            if (discreteAdapters.Count == 0)
+            {
+                // Do not add PP1/GT again: it is a child domain already represented by
+                // Intel RAPL Package. A visible NVML device with no DXCore discrete
+                // adapter means the topology is incomplete, so do not call this iGPU-only.
+                if ((power.GpuPowerReadings == null || power.GpuPowerReadings.Length == 0)
+                    && power.CpuPackageSource.IndexOf(
+                        "Intel RAPL Package", StringComparison.OrdinalIgnoreCase) >= 0)
+                    power.CoreTotalWatts = power.CpuPackageWatts;
+                return;
+            }
+
+            if (power.GpuPowerReadings == null
+                || power.GpuPowerReadings.Length != discreteAdapters.Count
+                || !power.GpuPowerWatts.HasValue)
+                return;
+
+            // Counts alone do not prove that NVML covers the DXCore discrete adapters.
+            // Require a one-to-one exact driver-reported name match as well; an unknown,
+            // non-NVIDIA, or differently named adapter keeps the aggregate unavailable.
+            var matchedReadings = new HashSet<int>();
+            foreach (string adapterName in discreteAdapters.Values)
+            {
+                int match = -1;
+                for (int i = 0; i < power.GpuPowerReadings.Length; i++)
+                {
+                    if (matchedReadings.Contains(i)) continue;
+                    if (string.Equals(adapterName, power.GpuPowerReadings[i]?.Name,
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        match = i;
+                        break;
+                    }
+                }
+                if (match < 0) return;
+                matchedReadings.Add(match);
+            }
+
+            power.CoreTotalWatts = power.CpuPackageWatts.Value + power.GpuPowerWatts.Value;
+        }
+
+        private static bool IsFresh(long sampleTimestamp, long now)
+            => sampleTimestamp > 0 && now >= sampleTimestamp
+                && now - sampleTimestamp <= 3L * Stopwatch.Frequency;
+
+        private static bool IsGpuFrameFresh(NvmlGpuPowerFrame frame, long now)
+            => frame != null && IsFresh(frame.SampleTimestamp, now);
+
+        private static GpuPowerReading[] GetFreshGpuReadings(NvmlGpuPowerFrame frame, long now)
+        {
+            if (frame?.Readings == null || !IsGpuFrameFresh(frame, now))
+                return Array.Empty<GpuPowerReading>();
+            return frame.Readings;
+        }
+
+        private static double? SumMeasuredGpuPower(GpuPowerReading[] readings)
+        {
+            if (readings == null || readings.Length == 0)
+                return null;
+
+            double total = 0;
+            foreach (GpuPowerReading reading in readings)
+            {
+                if (reading == null || reading.Kind != PowerValueKind.Measured
+                    || !reading.Watts.HasValue || double.IsNaN(reading.Watts.Value)
+                    || double.IsInfinity(reading.Watts.Value) || reading.Watts.Value < 0)
+                    return null;
+                total += reading.Watts.Value;
+            }
+            return total;
+        }
+
+        public bool Shutdown()
+        {
+            bool cpuStopped = _sensor.Shutdown();
+            bool gpuStopped = _gpuSensor.Shutdown();
+            return cpuStopped && gpuStopped;
+        }
 
         private static double? Average(IEnumerable<double?> values)
         {
@@ -708,6 +867,19 @@ namespace task_monitor
             foreach (double? value in values)
                 if (value.HasValue) { sum += value.Value; count++; }
             return count == 0 ? (double?)null : sum / count;
+        }
+
+        private static double? Maximum(IEnumerable<double?> values)
+        {
+            double maximum = 0;
+            bool found = false;
+            foreach (double? value in values)
+            {
+                if (!value.HasValue) continue;
+                maximum = found ? Math.Max(maximum, value.Value) : value.Value;
+                found = true;
+            }
+            return found ? maximum : (double?)null;
         }
 
         private static void AddHistory(Queue<double?> queue, double? value)

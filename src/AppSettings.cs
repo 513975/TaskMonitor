@@ -25,10 +25,8 @@ namespace task_monitor
     /// the conversion is display-side only. null = Celsius.</summary>
     public enum GpuTempUnit { Celsius, Fahrenheit }
 
-    /// <summary>任务栏功耗栏显示来源 (settings.yaml <c>powerTaskbarSource</c>)：
-    /// 电池端功耗（默认）、CPU 封装功耗或系统整机功耗。来源不可用时任务栏显示
-    /// <c>--</c>，不会静默切换到另一种口径。</summary>
-    public enum PowerTaskbarSource { Battery, CpuPackage, System }
+    /// <summary>任务栏功耗栏显示来源：自动跟随外接电源状态（默认），或固定显示一种功耗。</summary>
+    public enum PowerTaskbarSource { Battery = 0, CpuPackage = 1, System = 2, Automatic = 3, CoreTotal = 4 }
 
     public sealed class TaskbarDisplaySelection
     {
@@ -212,9 +210,9 @@ namespace task_monitor
         public bool? PowerSamplingEnabled { get; set; }
 
         /// <summary>
-        /// 任务栏功耗栏的默认来源 (设置 → 采样项目 → 功耗)：null = 电池功耗（默认），
-        /// 也可选择 CPU 封装功耗或系统整机功耗。仅改变任务栏栏位的显示来源，不改变
-        /// 功耗详情页的全部数据与曲线。
+        /// 任务栏功耗栏的来源 (设置 → 采样项目 → 功耗)：null = 自动（默认），外接电源在线时
+        /// 显示核心总功耗，明确离线时显示电池放电功率；也可固定显示核心总功耗、CPU 封装功耗或电池功率。
+        /// 仅改变任务栏栏位的显示来源，不改变功耗详情页的数据。
         /// </summary>
         public PowerTaskbarSource? PowerTaskbarSource { get; set; }
 
@@ -379,8 +377,14 @@ namespace task_monitor
                     .WithNamingConvention(CamelCaseNamingConvention.Instance)
                     .IgnoreUnmatchedProperties()   // tolerate keys from newer builds
                     .Build();
-                return deserializer.Deserialize<AppSettings>(File.ReadAllText(FilePath))
-                       ?? new AppSettings { IsNewInstall = true };  // header-only / empty file
+                var settings = deserializer.Deserialize<AppSettings>(File.ReadAllText(FilePath))
+                    ?? new AppSettings { IsNewInstall = true };  // header-only / empty file
+                if (settings.PowerTaskbarSource == task_monitor.PowerTaskbarSource.System)
+                {
+                    settings.PowerTaskbarSource = null;
+                    Logger.Info("settings.yaml 中已移除的功耗来源已迁移为自动功耗来源");
+                }
+                return settings;
             }
             catch (Exception ex)
             {

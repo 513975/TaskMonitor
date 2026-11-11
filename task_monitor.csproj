@@ -22,6 +22,9 @@
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <LangVersion>latest</LangVersion>
     <Platforms>AnyCPU</Platforms>
+    <!-- Keep 64-bit Windows runs 64-bit so optional vendor driver telemetry (including
+         NVIDIA's x64 NVML) can be loaded without shipping or redistributing driver DLLs. -->
+    <Prefer32Bit>false</Prefer32Bit>
     <!-- Elevation is self-managed (first-run consent dialog + runas self-relaunch in
          App.RunElevationGate), so the manifest declares asInvoker — see src\app.manifest.
          PerMonitorV2 is declared there; App's static ctor opts WPF into per-window DPI scaling. -->

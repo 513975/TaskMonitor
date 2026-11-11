@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -44,9 +43,7 @@ namespace task_monitor
             {
                 var values = CpuCoresChart.Values;
                 if (i < 0 || values == null || i >= values.Count) return "";
-                double? watts = _coreWatts != null && i < _coreWatts.Length ? _coreWatts[i] : (double?)null;
-                string power = watts.HasValue ? $"{(_coreKinds != null && i < _coreKinds.Length && _coreKinds[i] == PowerValueKind.Estimated ? "~" : "")}{watts.Value:F1} W" : "—";
-                return $"CPU {i} · {values[i]:F0}% · {power}";
+                return $"CPU {i} · {values[i]:F0}%";
             });
 
             ProcessListTip.Attach(ProcessList, ProcessTip, ProcessTipDesc, ProcessTipPath);
@@ -76,16 +73,6 @@ namespace task_monitor
             {
                 PerCoreCard.Visibility = Visibility.Visible;
                 CpuCoresChart.Values = s.PerCoreUsage;
-                _coreWatts = s.Power?.CoreWatts ?? Array.Empty<double?>();
-                _coreKinds = s.Power?.CoreKinds ?? Array.Empty<PowerValueKind>();
-                var labels = new List<string>(s.PerCoreUsage.Length);
-                for (int i = 0; i < s.PerCoreUsage.Length; i++)
-                {
-                    double? watts = i < _coreWatts.Length ? _coreWatts[i] : (double?)null;
-                    PowerValueKind kind = i < _coreKinds.Length ? _coreKinds[i] : PowerValueKind.Unavailable;
-                    labels.Add(watts.HasValue ? $"{(kind == PowerValueKind.Estimated ? "~" : "")}{watts.Value:F1}" : "—");
-                }
-                CorePowerLabels.ItemsSource = labels;
             }
             else
             {
@@ -103,9 +90,6 @@ namespace task_monitor
                 ProcessList.ItemsSource = s.TopProcesses;
             }
         }
-
-        private double?[] _coreWatts = Array.Empty<double?>();
-        private PowerValueKind[] _coreKinds = Array.Empty<PowerValueKind>();
 
         // ---------- Uptime formatting (ms → "d天 hh:mm:ss" / "h:mm:ss") ----------
         private static string FormatUptime(long ms)

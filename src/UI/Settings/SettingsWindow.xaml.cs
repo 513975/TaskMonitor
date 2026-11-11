@@ -58,7 +58,7 @@ namespace task_monitor
         private readonly Action<double> _floatingOpacityChanged; // 悬浮模式 → 透明度 (0.2–1.0)
         private readonly Action<int> _intervalChanged;        // ms: 500 / 1000 / 2000
         private readonly Action<int, bool> _samplingChanged;  // (overlay hit slot 0–5, enabled)
-        private readonly Action<int> _powerTaskbarSourceChanged; // 0=电池 1=CPU封装 2=系统整机
+        private readonly Action<int> _powerTaskbarSourceChanged; // 0=自动 1=核心总功耗 2=CPU封装 3=电池
         private readonly Action<bool> _mergeSamePathChanged;  // 合并相同程序
         private readonly Action<int, int> _diskDisplayChanged; // (mode 0=平均 1=最高 2=特定, PhysicalDrive index)
         private readonly Action<int, int> _gpuDisplayChanged;  // (mode 0=平均 1=最高 2=特定, "GPU N" number)
@@ -127,7 +127,7 @@ namespace task_monitor
         /// <param name="samplingMask">Current per-metric sampling mask (SystemSampler.Mask*
         /// bits, in overlay hit-slot order).</param>
         /// <param name="samplingChanged">Reported with (slot, enabled) on every 采样 toggle.</param>
-        /// <param name="powerTaskbarSourceIndex">任务栏功耗来源：0=电池（默认）、1=CPU 封装、2=系统整机。</param>
+        /// <param name="powerTaskbarSourceIndex">任务栏功耗来源：0=自动（默认）、1=核心总功耗、2=CPU 封装、3=电池。</param>
         /// <param name="powerTaskbarSourceChanged">Reported on each taskbar power-source selection.</param>
         /// <param name="mergeSamePath">Current 合并相同程序 state (yaml null = the on default).</param>
         /// <param name="diskDisplayIndex">Current 磁盘显示方式 combo index: 0=所有磁盘平均
@@ -305,7 +305,7 @@ namespace task_monitor
             GpuSwitch.IsOn = (samplingMask & SystemSampler.MaskGpu) != 0;
             NetSwitch.IsOn = (samplingMask & SystemSampler.MaskNet) != 0;
             PowerSwitch.IsOn = (samplingMask & SystemSampler.MaskPower) != 0;
-            PowerSourceCombo.SelectedIndex = powerTaskbarSourceIndex < 0 || powerTaskbarSourceIndex > 2
+            PowerSourceCombo.SelectedIndex = powerTaskbarSourceIndex < 0 || powerTaskbarSourceIndex > 3
                 ? 0 : powerTaskbarSourceIndex;
             MergeSwitch.IsOn = mergeSamePath;
             DiskDisplayCombo.SelectedIndex = diskDisplayIndex < 0 || diskDisplayIndex > 2 ? 0 : diskDisplayIndex;
@@ -901,7 +901,7 @@ namespace task_monitor
             _mergeSamePathChanged?.Invoke(MergeSwitch.IsOn);
         }
 
-        // 功耗 → 任务栏显示来源: 0=电池（默认） 1=CPU 封装 2=系统整机。
+        // 功耗 → 任务栏显示来源: 0=自动（默认）1=核心总功耗 2=CPU 封装 3=电池。
         private void PowerSourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (!_loaded) return;

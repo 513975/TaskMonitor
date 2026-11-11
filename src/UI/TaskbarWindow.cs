@@ -58,8 +58,10 @@ namespace task_monitor
         // bottom row moves to the next cell, leaving an intentional alignment hole.
         // ComputeLayout derives drawing, hit-testing and popup anchors from the same geometry.
         private const float ITEM_GAP = 0f;                 // groups sit flush against each other
-        private static readonly float[] GroupWidths = { 70f, 70f, 70f, 84f, 70f }; // 任务栏普通 cell 70 DIP, 网络 cell 84 DIP
+        private static readonly float[] GroupWidths = { 70f, 70f, 70f, 84f, 70f }; // ordinary cell 70 DIP, network cell 84 DIP
         private const int GroupCount = 5;                  // six metrics can occupy five horizontal cells
+        private const float PowerGroupWidth = 96f;         // power label + longest signed F1 watt value + a visible gap
+        private const float CompactPowerGroupWidth = 92f;
         private const int VerticalMaxColumns = 4;          // preserve the original side-taskbar column limit
         private const int SlotCount = 6;                   // hit slots: CPU/内存/磁盘/GPU/网络/功耗
         private const int PackedPositionCount = 10;        // six items + GPU/network second rows + up to two alignment holes
@@ -146,6 +148,7 @@ namespace task_monitor
         // one-line strip's own 16-DIP pitch is ALREADY the compact form — untouched.
         private static readonly float[] CompactGroupWidths = { 65f, 65f, 65f, 78f, 65f };
         private static float GroupW(int g, bool compact) => (compact ? CompactGroupWidths : GroupWidths)[g];
+        private static float PowerW(bool compact) => compact ? CompactPowerGroupWidth : PowerGroupWidth;
         private static float GridRowH(bool compact) => compact ? 18f : GRID_ROW_H;
         private static float StripBlockH(bool compact) => compact ? 40f : STRIP_BLOCK_H;
         private static float StripBlockPad(bool compact) => compact ? 2f : STRIP_BLOCK_PAD;
@@ -195,6 +198,7 @@ namespace task_monitor
             public int Pos0, Pos1, Pos2, Pos3, Pos4, Pos5, Pos6, Pos7, Pos8, Pos9;
             public int TempPos;
             public int NetPos;
+            public int PowerPos;
             public int SlotMask;
             public GpuTaskbarContent GpuContent;
             public bool Compact;
@@ -204,11 +208,19 @@ namespace task_monitor
             public int ColRows0, ColRows1, ColRows2, ColRows3;
             public int PosCol0, PosCol1, PosCol2, PosCol3, PosCol4, PosCol5, PosCol6, PosCol7, PosCol8, PosCol9;
             public int PosRow0, PosRow1, PosRow2, PosRow3, PosRow4, PosRow5, PosRow6, PosRow7, PosRow8, PosRow9;
-            public int NetCol, NetRow;
+            public int NetCol, NetRow, PowerCol;
 
             public bool GroupVisible(int g) => GroupLeft(g) >= 0f;
             public float GroupLeft(int g) => g == 0 ? Left0 : g == 1 ? Left1 : g == 2 ? Left2 : g == 3 ? Left3 : Left4;
-            public float GroupW(int g) => TaskbarWindow.GroupW(NetPos >= 0 && NetPos / 2 == g ? 3 : 0, Compact);
+            public float GroupW(int g)
+            {
+                float width = TaskbarWindow.GroupW(0, Compact);
+                if (NetPos >= 0 && NetPos / 2 == g)
+                    width = Math.Max(width, TaskbarWindow.GroupW(3, Compact));
+                if (PowerPos >= 0 && PowerPos / 2 == g)
+                    width = Math.Max(width, TaskbarWindow.PowerW(Compact));
+                return width;
+            }
             public bool SlotVisible(int slot) => (SlotMask & (1 << slot)) != 0;
             public int SlotAt(int pos) => pos == 0 ? Pos0 : pos == 1 ? Pos1 : pos == 2 ? Pos2 : pos == 3 ? Pos3 : pos == 4 ? Pos4 : pos == 5 ? Pos5 : pos == 6 ? Pos6 : pos == 7 ? Pos7 : pos == 8 ? Pos8 : Pos9;
             public int PositionOf(int slot) => Pos0 == slot ? 0 : Pos1 == slot ? 1 : Pos2 == slot ? 2 : Pos3 == slot ? 3 : Pos4 == slot ? 4 : Pos5 == slot ? 5 : Pos6 == slot ? 6 : Pos7 == slot ? 7 : Pos8 == slot ? 8 : Pos9 == slot ? 9 : -1;
@@ -222,9 +234,25 @@ namespace task_monitor
                 for (int i = 0; i < c; i++) x += ColumnWidth(i);
                 return x;
             }
-            public float ColumnWidth(int c) => Columns > 1
-                ? TaskbarWindow.GroupW(NetCol == c ? 3 : 0, Compact)
-                : Width;
+            public float ColumnWidth(int c)
+            {
+                if (Columns <= 1) return Width;
+                return NaturalColumnWidth(c);
+            }
+            private float NaturalColumnWidth(int c)
+            {
+                float width = TaskbarWindow.GroupW(0, Compact);
+                if (NetCol == c) width = Math.Max(width, TaskbarWindow.GroupW(3, Compact));
+                if (PowerCol == c) width = Math.Max(width, TaskbarWindow.PowerW(Compact));
+                return width;
+            }
+            public float NaturalColumnsWidth()
+            {
+                float width = 0f;
+                for (int c = 0; c < Columns; c++)
+                    width += NaturalColumnWidth(c);
+                return width;
+            }
             public void SetPosCell(int pos, int col, int row)
             {
                 if (pos == 0) { PosCol0 = col; PosRow0 = row; }
@@ -319,8 +347,10 @@ namespace task_monitor
                 PosCol0 = -1, PosCol1 = -1, PosCol2 = -1, PosCol3 = -1, PosCol4 = -1, PosCol5 = -1, PosCol6 = -1, PosCol7 = -1, PosCol8 = -1, PosCol9 = -1,
                 PosRow0 = -1, PosRow1 = -1, PosRow2 = -1, PosRow3 = -1, PosRow4 = -1, PosRow5 = -1, PosRow6 = -1, PosRow7 = -1, PosRow8 = -1, PosRow9 = -1,
                 NetCol = -1,
+                PowerCol = -1,
                 TempPos = -1,
                 NetPos = -1,
+                PowerPos = -1,
                 SlotMask = mask,
                 GpuContent = gpuContent,
                 Compact = compact,
@@ -353,7 +383,11 @@ namespace task_monitor
                     if (gpuContent != GpuTaskbarContent.Temperature) SetPos(pos++, slot);
                     if (gpuContent != GpuTaskbarContent.Usage) { SetPos(pos, slot); l.TempPos = pos; pos++; }
                 }
-                else SetPos(pos++, slot);
+                else
+                {
+                    if (slot == 5) l.PowerPos = pos;
+                    SetPos(pos++, slot);
+                }
             }
             if (vertical) return ComputeVerticalLayout(l, pos, availableWidthDip);
             float x = 0f;
@@ -374,23 +408,32 @@ namespace task_monitor
             l.Vertical = true;
             bool net = l.NetVisible;
             float w0 = GroupW(0, l.Compact), w3 = GroupW(3, l.Compact);
-            float natural = packed > 0 ? w0 + (net ? w3 - w0 : 0f) : 0f;
+            float powerWidth = l.PowerPos >= 0 ? PowerW(l.Compact) : w0;
+            float natural = packed > 0
+                ? Math.Max(w0 + (net ? w3 - w0 : 0f), powerWidth)
+                : 0f;
             if (natural <= 0f) return l;
 
             float avail = availableWidthDip > 0f ? availableWidthDip : natural;
             int items = packed - (net ? 1 : 0);
-            int maxCols = (int)((avail - (net ? w3 - w0 : 0f)) / w0 + LAYOUT_FIT_EPSILON);
+            // Reserve the power column's extra width before choosing the column count.
+            // This is conservative if power and network land in the same column, but
+            // guarantees the resulting variable-width columns never exceed the taskbar.
+            float reservedExtra = (net ? w3 - w0 : 0f) + Math.Max(0f, powerWidth - w0);
+            int maxCols = (int)((avail - reservedExtra) / w0 + LAYOUT_FIT_EPSILON);
             maxCols = Math.Min(Math.Min(Math.Max(maxCols, 1), items), VerticalMaxColumns);
 
             if (maxCols == 1)
             {
                 l.Columns = 1;
                 l.Width = Math.Min(natural, avail);
-                l.TwoLine = l.Width < Math.Min(STRIP_TWO_LINE_MIN_W, natural);
+                float oneLineWidth = Math.Max(STRIP_TWO_LINE_MIN_W, powerWidth);
+                l.TwoLine = l.Width < Math.Min(oneLineWidth, natural);
                 l.RowH = l.TwoLine ? StripBlockH(l.Compact) : STRIP_H;
                 l.ColRows0 = packed;
                 for (int p = 0; p < packed; p++) l.SetPosCell(p, 0, p);
                 if (net) { l.NetCol = 0; l.NetRow = l.NetPos; }
+                if (l.PowerPos >= 0) l.PowerCol = 0;
                 l.Height = l.TwoLine ? StripPosTop(l, packed) : packed * l.RowH;
                 return l;
             }
@@ -412,8 +455,9 @@ namespace task_monitor
                 row++;
             }
             if (net) { l.NetCol = l.PosCol(l.NetPos); l.NetRow = l.PosRow(l.NetPos); }
+            if (l.PowerPos >= 0) l.PowerCol = l.PosCol(l.PowerPos);
             l.Columns = col + 1;
-            l.Width = l.Columns * w0 + (net ? w3 - w0 : 0f);
+            l.Width = l.NaturalColumnsWidth();
             int maxRows = Math.Max(Math.Max(l.ColRows0, l.ColRows1), Math.Max(l.ColRows2, l.ColRows3));
             l.Height = maxRows * l.RowH;
             return l;
@@ -682,7 +726,7 @@ namespace task_monitor
 
         private volatile GpuTaskbarContent _gpuTaskbarContent = GpuTaskbarContent.Usage;
         private volatile bool _gpuTempFahrenheit;
-        private volatile PowerTaskbarSource _powerTaskbarSource = PowerTaskbarSource.Battery;
+        private volatile PowerTaskbarSource _powerTaskbarSource = PowerTaskbarSource.Automatic;
 
         public void SetGpuTempDisplay(GpuTaskbarContent content, int tempIndex, bool fahrenheit)
         {
@@ -698,7 +742,7 @@ namespace task_monitor
                 WindowInterop.PostMessageW(OverlayHwnd, WindowInterop.WM_APP_SET_METRICS, IntPtr.Zero, IntPtr.Zero);
         }
 
-        /// <summary>设置 → 采样项目 → 功耗：任务栏功耗栏只切换显示来源；详情页仍保留全部数据。</summary>
+        /// <summary>设置 → 采样项目 → 功耗：任务栏功耗栏来源设置。</summary>
         public void SetPowerTaskbarSource(PowerTaskbarSource source)
         {
             _powerTaskbarSource = source;
@@ -2079,28 +2123,49 @@ namespace task_monitor
         private static string PowerTaskbarText(PowerSnapshot power, PowerTaskbarSource source)
         {
             if (power == null) return "--";
-            switch (source)
+            if (source == PowerTaskbarSource.Automatic)
             {
-                case PowerTaskbarSource.CpuPackage:
-                    if (power.CpuPackageWatts is double cpuPackageWatts)
-                        return $"{(power.CpuPackageKind == PowerValueKind.Estimated ? "~" : "")}{cpuPackageWatts:F1}W";
-                    break;
-                case PowerTaskbarSource.System:
-                    if (power.SystemWatts is double systemWatts)
-                        return $"{(power.SystemKind == PowerValueKind.Estimated ? "~" : "")}{systemWatts:F1}W";
-                    break;
-                default:
-                    if (power.BatteryPowerWatts is double batteryWatts)
-                    {
-                        string sign = power.BatteryState == BatteryFlowState.Charging ? "+" :
-                                      power.BatteryState == BatteryFlowState.Discharging ? "-" : "";
-                        return $"{sign}{batteryWatts:F1}W";
-                    }
-                    if (power.BatteryState == BatteryFlowState.Idle)
-                        return "0.0W";
-                    break;
+                // Select by adapter presence, not battery flow: some laptops supplement
+                // AC power from the battery under peak load while still plugged in.
+                if (!power.AcOnLine.HasValue) return "--";
+                if (power.AcOnLine.Value)
+                    source = PowerTaskbarSource.CoreTotal;
+                else
+                {
+                    if (power.BatteryPresent != true
+                        || power.BatteryState != BatteryFlowState.Discharging)
+                        return "--";
+                    return power.BatteryPowerWatts is double batteryDrawWatts
+                        ? $"{batteryDrawWatts:F1}W" : "--";
+                }
             }
-            return "--";
+
+            if (source == PowerTaskbarSource.CoreTotal)
+                return power.CoreTotalWatts is double coreTotalWatts
+                    ? $"{coreTotalWatts:F1}W" : "--";
+
+            if (source == PowerTaskbarSource.CpuPackage)
+            {
+                // The taskbar has no room for a stale qualifier; never present a retained
+                // fallback as if it were a live CPU Package sample.
+                if (power.CpuPackageKind == PowerValueKind.Measured
+                    && power.CpuPackageWatts is double cpuPackageWatts)
+                    return $"{cpuPackageWatts:F1}W";
+                return "--";
+            }
+
+            return BatteryTaskbarText(power);
+        }
+
+        private static string BatteryTaskbarText(PowerSnapshot power)
+        {
+            if (power.BatteryPowerWatts is double batteryWatts)
+            {
+                string sign = power.BatteryState == BatteryFlowState.Charging ? "+" :
+                              power.BatteryState == BatteryFlowState.Discharging ? "-" : "";
+                return $"{sign}{batteryWatts:F1}W";
+            }
+            return power.BatteryState == BatteryFlowState.Idle ? "0.0W" : "--";
         }
 
         // Apply the controller's latest publication on this HWND's own thread. Sampling

@@ -16,11 +16,15 @@ namespace task_monitor
     {
         public string Name { get; }                 // DXCore DriverDescription ("NVIDIA GeForce …")
         public long SharedTotalBytes { get; }       // SharedSystemMemory — fixed while enumerated
+        public long AdapterKey { get; }             // DXCore InstanceLuid — groups physical nodes of one adapter
+        public bool? IsIntegrated { get; }           // null when the DXCore property could not be read
 
-        internal GpuInfo(string name, long sharedTotalBytes)
+        internal GpuInfo(string name, long sharedTotalBytes, long adapterKey, bool? isIntegrated)
         {
             Name = name;
             SharedTotalBytes = sharedTotalBytes;
+            AdapterKey = adapterKey;
+            IsIntegrated = isIntegrated;
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
@@ -272,6 +276,28 @@ namespace task_monitor
         /// Read by SystemSampler on the same thread before it samples the process GPU
         /// counters.</summary>
         public bool NeedsPdhEngineData { get; private set; }
+
+        /// <summary>
+        /// Returns adapter classification for the power aggregate without sampling
+        /// utilization, memory or temperature. This keeps core-total validity independent
+        /// of the GPU display switch while still detecting discrete adapters that NVML
+        /// may not support.
+        /// </summary>
+        public List<GpuInfo> GetPowerTopology()
+        {
+            if (!_dxcoreUnavailable && ++_ticksSinceEnumerate >= ReenumerateEveryTicks)
+            {
+                _ticksSinceEnumerate = 0;
+                Reenumerate();
+            }
+
+            var result = new List<GpuInfo>(_adapters.Count);
+            var ordered = new List<AdapterEntry>(_adapters.Values);
+            ordered.Sort((a, b) => a.SortOrder.CompareTo(b.SortOrder));
+            foreach (AdapterEntry entry in ordered)
+                result.Add(entry.Info);
+            return result;
+        }
 
         /// <param name="mode">Headline source (设置 → 采样项目 → GPU → 显示方式): the MAX
         /// (the GPU default) or mean of per-adapter utilization, or one specific
@@ -735,18 +761,19 @@ namespace task_monitor
             long dedicatedSystem = GetInt64Property(adapter, DXCoreAdapterProperty.DedicatedSystemMemory);
             long shared = GetInt64Property(adapter, DXCoreAdapterProperty.SharedSystemMemory);
             long cap = ApplyTaskmgrCapRounding(dedicated + dedicatedSystem);
+            bool? isIntegrated = GetNullableByteProperty(adapter, DXCoreAdapterProperty.IsIntegrated);
 
             var entry = new AdapterEntry
             {
                 Adapter = adapter,
                 Luid = luid,
-                Info = new GpuInfo(name, Math.Max(0, shared)),
+                Info = new GpuInfo(name, Math.Max(0, shared), luid, isIntegrated),
                 PhysicalIndex = phys,
                 EngineTimeSupported = adapter.IsQueryStateSupported(DXCoreAdapterState.AdapterEngineRunningTimeMicroseconds),
                 MemoryUsageSupported = adapter.IsQueryStateSupported(DXCoreAdapterState.AdapterMemoryUsageBytes),
                 MemoryBudgetSupported = adapter.IsQueryStateSupported(DXCoreAdapterState.AdapterMemoryBudget),
                 TemperatureSupported = adapter.IsQueryStateSupported(DXCoreAdapterState.AdapterTemperatureCelsius),
-                IsIntegrated = GetByteProperty(adapter, DXCoreAdapterProperty.IsIntegrated),
+                IsIntegrated = isIntegrated == true,
                 DedicatedCapBytes = cap,
             };
 
@@ -808,6 +835,12 @@ namespace task_monitor
         {
             int hr = adapter.GetProperty(property, (UIntPtr)1, _outBuf);
             return hr >= 0 && Marshal.ReadByte(_outBuf) != 0;
+        }
+
+        private bool? GetNullableByteProperty(IDXCoreAdapter adapter, DXCoreAdapterProperty property)
+        {
+            int hr = adapter.GetProperty(property, (UIntPtr)1, _outBuf);
+            return hr < 0 ? (bool?)null : Marshal.ReadByte(_outBuf) != 0;
         }
 
         private string GetStringProperty(IDXCoreAdapter adapter, DXCoreAdapterProperty property)

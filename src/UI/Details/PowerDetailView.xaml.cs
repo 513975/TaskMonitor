@@ -10,13 +10,10 @@ namespace task_monitor
     public partial class PowerDetailView : UserControl, IDetailView
     {
         private readonly ChartTipHost _tip = new ChartTipHost();
-        private readonly ProcessIconCache _icons = new ProcessIconCache();
         private int _intervalMs = 1000;
-        private IReadOnlyList<double?> _systemHistory;
         private IReadOnlyList<double?> _cpuPackageHistory;
+        private IReadOnlyList<double?> _gpuPowerHistory;
         private IReadOnlyList<double?> _batteryHistory;
-        private PowerValueKind _systemKind;
-        private PowerValueKind _cpuPackageKind;
 
         public ContentControl PinSlot => PinSlotHost;
 
@@ -27,13 +24,14 @@ namespace task_monitor
 
             _tip.Attach(PowerChart, PowerChart.HitTest, HistoryTip, HistoryTipText, i =>
             {
-                double? system = ValueAt(_systemHistory, i);
                 double? cpu = ValueAt(_cpuPackageHistory, i);
+                double? gpu = ValueAt(_gpuPowerHistory, i);
                 double? battery = ValueAt(_batteryHistory, i);
-                string left = system.HasValue ? $"整机/组件 {FormatWatts(system, _systemKind)}" : "整机/组件 —";
-                string right = cpu.HasValue ? $"CPU 封装 {FormatWatts(cpu, _cpuPackageKind)}" : "CPU 封装 —";
-                string third = battery.HasValue ? $"电池 {FormatBatteryFlow(battery.Value)}" : "电池 —";
-                return $"{HistoryTimeFormatter.Ago(59 - i, _intervalMs)} · {left} · {right} · {third}";
+                string left = cpu.HasValue ? $"CPU 封装 {FormatWatts(cpu)}" : "CPU 封装 —";
+                string gpuText = gpu.HasValue ? $"GPU 合计 {FormatWatts(gpu)}" : "GPU 合计 —";
+                string batteryText = battery.HasValue
+                    ? $"电池 {FormatBatteryFlow(battery.Value)}" : "电池 —";
+                return $"{HistoryTimeFormatter.Ago(59 - i, _intervalMs)} · {left} · {gpuText} · {batteryText}";
             });
         }
 
@@ -41,48 +39,42 @@ namespace task_monitor
         {
             _intervalMs = Math.Max(1, snapshot.SampleIntervalMs);
             PowerSnapshot power = snapshot.Power ?? PowerSnapshot.Empty;
-            _systemKind = power.SystemKind;
-            _cpuPackageKind = power.CpuPackageKind;
-            if (power.SystemWatts.HasValue)
-            {
-                SystemHeaderText.Text = FormatWatts(power.SystemWatts, power.SystemKind);
-                SystemHeaderLabelText.Text = power.SystemKind == PowerValueKind.Estimated
-                    ? "电池端整机功耗估算"
-                    : "整机功率";
-            }
-            else if (power.BatteryState == BatteryFlowState.Charging && power.BatteryPowerWatts.HasValue)
-            {
-                SystemHeaderText.Text = $"+{power.BatteryPowerWatts.Value:F1} W";
-                SystemHeaderLabelText.Text = "电池充电功率 · 不代表整机耗电";
-            }
-            else
-            {
-                SystemHeaderText.Text = "—";
-                SystemHeaderLabelText.Text = "整机功率不可用";
-            }
-            CpuPackageValueRun.Text = FormatWatts(power.CpuPackageWatts, power.CpuPackageKind);
+            CoreTotalHeaderText.Text = FormatWatts(power.CoreTotalWatts);
+            CoreTotalHeaderLabelText.Text = "核心总功耗";
+            CoreTotalHeaderText.ToolTip = "确认仅核显时为 CPU Package；存在独显时为 CPU Package + 完整实测的 NVML 独显功率。不是整机功耗";
+            CpuInputWattsText.Text = FormatWatts(power.CpuPackageWatts);
+            CpuInputStatusText.Text = KindText(power.CpuPackageKind);
+            string packageTooltip = power.CpuPackageSampleTimeUtc == default(DateTime)
+                ? power.CpuPackageSource
+                : $"{power.CpuPackageSource}\n测量时间：{power.CpuPackageSampleTimeUtc.ToLocalTime():HH:mm:ss}";
+            if (power.CpuPackageSource.IndexOf("Intel RAPL Package", StringComparison.OrdinalIgnoreCase) >= 0)
+                packageTooltip += "\nPackage 是封装域；PP0/IA 是较窄的核心域，两者范围不同，不应相加。";
+            CpuInputWattsText.ToolTip = packageTooltip;
+            GpuInputWattsText.Text = FormatWatts(power.GpuPowerWatts);
+            GpuInputStatusText.Text = power.GpuPowerWatts.HasValue
+                ? $"实测 · {power.GpuPowerReadings.Length} 块"
+                : "不可用";
+            GpuInputWattsText.ToolTip = power.GpuPowerAvailability;
             BatteryStatusRun.Text = FormatBatteryStatus(power);
-            bool usesBatteryForSystemEstimate = power.SystemKind == PowerValueKind.Estimated
-                && power.BatteryState == BatteryFlowState.Discharging
-                && power.BatteryPowerWatts.HasValue;
-            bool hasBatteryDischargeEstimate = usesBatteryForSystemEstimate;
-            bool needsAvailabilityNotice = power.SystemKind == PowerValueKind.Estimated
-                || (!power.SystemWatts.HasValue && !hasBatteryDischargeEstimate)
-                || (power.BatteryState == BatteryFlowState.Charging && !power.SystemWatts.HasValue);
-            PowerUnavailableNotice.Visibility = needsAvailabilityNotice ? Visibility.Visible : Visibility.Collapsed;
+            BatteryStatusTextBlock.ToolTip = string.IsNullOrWhiteSpace(power.BatterySource)
+                ? null : power.SampleTimeUtc == default(DateTime)
+                    ? power.BatterySource
+                    : $"{power.BatterySource}\n更新时间：{power.SampleTimeUtc.ToLocalTime():HH:mm:ss}";
+            PowerUnavailableNotice.Visibility = power.CpuPackageWatts.HasValue
+                ? Visibility.Collapsed : Visibility.Visible;
             PowerUnavailableText.Text = power.AvailabilityMessage;
 
-            string source = !string.IsNullOrWhiteSpace(power.SystemSource)
-                ? power.SystemSource : power.BatterySource;
-            string sourceKind = power.SystemWatts.HasValue
-                ? KindText(power.SystemKind)
-                : power.BatteryPowerWatts.HasValue ? "Windows 报告" : "不可用";
-            SystemSourceRun.Text = JoinSource(source, sourceKind);
-            SystemAverageText.Text = FormatWatts(power.SystemAverageWatts, power.SystemKind);
-            SystemPeakText.Text = FormatWatts(power.SystemPeakWatts, power.SystemKind);
-            EnergyText.Text = power.SystemEnergyWh.HasValue ? $"{power.SystemEnergyWh.Value:F2} Wh" : "—";
-            BatteryAverageText.Text = FormatWatts(power.BatteryAverageWatts, PowerValueKind.Measured);
-            BatteryPeakText.Text = FormatWatts(power.BatteryPeakWatts, PowerValueKind.Measured);
+            CpuSourceRun.Text = JoinSource(power.CpuPackageSource, KindText(power.CpuPackageKind));
+            CpuPackagePeakText.Text = FormatWatts(power.CpuPackagePeakWatts);
+            string peakWindow = $"最近最多 60 个采样点（当前间隔下约 {Math.Ceiling(59 * _intervalMs / 1000.0):F0} 秒）";
+            CpuPackagePeakText.ToolTip = peakWindow + "内的 CPU Package 峰值。";
+            GpuPowerPeakText.Text = FormatWatts(power.GpuPowerPeakWatts);
+            GpuPowerPeakText.ToolTip = peakWindow + "内 NVML GPU 汇总峰值；缺测样本不按 0 计算。";
+            CoreTotalEnergyText.Text = power.CoreTotalEnergyWh.HasValue
+                ? $"{power.CoreTotalEnergyWh.Value:F2} Wh" : "—";
+            CoreTotalEnergyText.ToolTip = "本次运行中对完整、新鲜的核心总功率积分；功耗来源缺测时暂停累计，不跨缺口估算。";
+            BatteryAverageText.Text = FormatWatts(power.BatteryAverageWatts);
+            BatteryPeakText.Text = FormatWatts(power.BatteryPeakWatts);
             BatteryEnergyText.Text = power.BatteryEnergyWh.HasValue ? $"{power.BatteryEnergyWh.Value:F2} Wh" : "—";
             BatteryAverageLabelText.Text = power.BatteryState == BatteryFlowState.Charging
                 ? "平均充电功率" : power.BatteryState == BatteryFlowState.Discharging
@@ -93,30 +85,13 @@ namespace task_monitor
             BatteryEnergyLabelText.Text = power.BatteryState == BatteryFlowState.Charging
                 ? "充电段累计" : power.BatteryState == BatteryFlowState.Discharging
                     ? "放电段累计" : "电池累计";
-            SystemEnergyLabelText.Text = power.SystemKind == PowerValueKind.Estimated
-                ? "估算累计能耗" : "累计耗能";
-
-            _systemHistory = PadHistory(AsReadOnly(power.SystemHistory));
             _cpuPackageHistory = PadHistory(AsReadOnly(power.CpuPackageHistory));
+            _gpuPowerHistory = PadHistory(AsReadOnly(power.GpuPowerHistory));
             _batteryHistory = PadHistory(AsReadOnly(power.BatteryHistory));
-            // Battery discharge is already the system estimate on battery power; draw it
-            // once under the system series instead of stacking an identical battery line.
-            PowerChart.SystemValues = power.SystemWatts.HasValue
-                ? _systemHistory : PadHistory(Array.Empty<double?>());
             PowerChart.CpuPackageValues = _cpuPackageHistory;
-            PowerChart.BatteryDischargeValues = usesBatteryForSystemEstimate
-                ? PadHistory(Array.Empty<double?>())
-                : PadHistory(AsReadOnly(power.BatteryDischargeHistory));
+            PowerChart.GpuPowerValues = _gpuPowerHistory;
+            PowerChart.BatteryDischargeValues = PadHistory(AsReadOnly(power.BatteryDischargeHistory));
             PowerChart.BatteryChargeValues = PadHistory(AsReadOnly(power.BatteryChargeHistory));
-            PowerChart.HistoryDurationSeconds = (int)Math.Ceiling(59 * _intervalMs / 1000.0);
-            SystemLegendText.Text = power.SystemKind == PowerValueKind.Measured
-                ? "整机实测" : power.SystemKind == PowerValueKind.Estimated
-                    ? "整机估算" : "整机功率计";
-            SystemLegendDot.Visibility = power.SystemWatts.HasValue
-                ? Visibility.Visible : Visibility.Collapsed;
-            SystemLegendText.Visibility = SystemLegendDot.Visibility;
-            BatteryLegendPanel.Visibility = usesBatteryForSystemEstimate
-                ? Visibility.Collapsed : Visibility.Visible;
             _tip.Refresh();
 
             var components = new List<PowerRow>();
@@ -124,26 +99,31 @@ namespace task_monitor
                 components.Add(new PowerRow
                 {
                     Name = component.Name,
-                    WattsText = FormatWatts(component.Watts, component.Kind),
+                    WattsText = FormatWatts(component.Watts),
                     StatusText = KindText(component.Kind),
                     Source = component.Source,
                 });
             NoComponentsNotice.Visibility = components.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             if (components.Count == 0)
-                NoComponentsNotice.Text = power.AvailabilityMessage;
+                NoComponentsNotice.Text = power.CpuPackageWatts.HasValue
+                    ? "当前处理器未提供额外的 RAPL 功耗域"
+                    : power.AvailabilityMessage;
             ComponentList.ItemsSource = components;
-            var processRows = new List<PowerRow>();
-            foreach (ProcessPowerReading process in power.TopProcesses ?? new List<ProcessPowerReading>())
-                processRows.Add(new PowerRow
+
+            var gpuRows = new List<GpuPowerRow>();
+            foreach (GpuPowerReading reading in power.GpuPowerReadings ?? Array.Empty<GpuPowerReading>())
+                gpuRows.Add(new GpuPowerRow
                 {
-                    Name = process.Name,
-                    WattsText = FormatWatts(process.Watts, process.Kind),
-                    StatusText = KindText(process.Kind),
-                    ExePath = process.ExePath,
-                    Icon = _icons.Resolve(process.ExePath),
+                    Name = reading.Name,
+                    WattsText = FormatWatts(reading.Watts),
+                    StatusText = reading.Status,
+                    DeviceId = reading.DeviceId,
+                    Source = reading.Source,
+                    Tooltip = $"{reading.DeviceId}\n{reading.Source}\n更新时间：{reading.SampleTimeUtc.ToLocalTime():HH:mm:ss}",
                 });
-            NoProcessesNotice.Visibility = processRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            ProcessList.ItemsSource = processRows;
+            NoGpuPowerNotice.Visibility = gpuRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            NoGpuPowerNotice.Text = power.GpuPowerAvailability;
+            GpuPowerList.ItemsSource = gpuRows;
         }
 
         public void ApplyTheme(bool dark)
@@ -152,14 +132,14 @@ namespace task_monitor
                 ? new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20))
                 : new SolidColorBrush(Color.FromRgb(0xF3, 0xF3, 0xF3));
 
-            PowerChart.SystemColor = ChartPalette.Accent;
             PowerChart.CpuPackageColor = Color.FromRgb(0xF7, 0x63, 0x0C);
+            PowerChart.GpuPowerColor = Color.FromRgb(0x0E, 0xA5, 0xE9);
             PowerChart.BatteryColor = Color.FromRgb(0x10, 0xB9, 0x81);
             PowerChart.BatteryChargeColor = Color.FromRgb(0x8B, 0x5C, 0xF6);
             PowerChart.GridColor = ChartPalette.Grid;
             PowerChart.FrameColor = ChartPalette.FaintBase(0x66);
-            SystemLegendDot.Fill = new SolidColorBrush(ChartPalette.Accent);
             CpuLegendDot.Fill = new SolidColorBrush(Color.FromRgb(0xF7, 0x63, 0x0C));
+            GpuLegendDot.Fill = new SolidColorBrush(Color.FromRgb(0x0E, 0xA5, 0xE9));
             BatteryLegendDot.Fill = new SolidColorBrush(Color.FromRgb(0x10, 0xB9, 0x81));
             BatteryChargeLegendDot.Fill = new SolidColorBrush(Color.FromRgb(0x8B, 0x5C, 0xF6));
         }
@@ -185,7 +165,8 @@ namespace task_monitor
 
         private static string KindText(PowerValueKind kind)
             => kind == PowerValueKind.Measured ? "实测"
-             : kind == PowerValueKind.Estimated ? "估算" : "不可用";
+             : kind == PowerValueKind.Stale ? "暂时沿用上次读数"
+             : "不可用";
 
         private static string JoinSource(string source, string kind)
         {
@@ -194,9 +175,9 @@ namespace task_monitor
             return $"{source} · {kind}";
         }
 
-        private static string FormatWatts(double? watts, PowerValueKind kind)
+        private static string FormatWatts(double? watts)
             => watts.HasValue && IsUsable(watts.Value)
-                ? $"{(kind == PowerValueKind.Estimated ? "~" : "")}{watts.Value:F1} W" : "—";
+                ? $"{watts.Value:F1} W" : "—";
 
         private static string FormatBatteryFlow(double signedWatts)
             => signedWatts < 0
@@ -222,8 +203,16 @@ namespace task_monitor
             public string WattsText { get; set; }
             public string StatusText { get; set; }
             public string Source { get; set; }
-            public string ExePath { get; set; }
-            public System.Windows.Media.ImageSource Icon { get; set; }
+        }
+
+        private sealed class GpuPowerRow
+        {
+            public string Name { get; set; }
+            public string WattsText { get; set; }
+            public string StatusText { get; set; }
+            public string DeviceId { get; set; }
+            public string Source { get; set; }
+            public string Tooltip { get; set; }
         }
     }
 }

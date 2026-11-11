@@ -170,7 +170,9 @@ namespace task_monitor
         public void SetEnabledMask(int mask)
         {
             _enabledMask = mask;
-            _power.SetEnabled((mask & MaskPower) != 0);
+            bool powerEnabled = (mask & MaskPower) != 0;
+            _power.SetEnabled(powerEnabled);
+            _power.SetGpuEnabled(powerEnabled);
         }
 
         // 设置 → 采样项目 → 合并相同程序 — same volatile single-writer contract as
@@ -355,6 +357,7 @@ namespace task_monitor
             var pidToName = proc.PidToName;
 
             var snapshot = new SystemSnapshot { NetInfo = NetInfo.Empty };
+            List<GpuInfo> gpuPowerTopology = null;
 
             CpuSample cpu = default;
             if (cpuOn || powerOn)
@@ -379,22 +382,6 @@ namespace task_monitor
                     snapshot.HandleCount = proc.HandleCount;
                     snapshot.UptimeMs = summary.UptimeMs;
                     snapshot.TopProcesses = proc.TopProcesses;
-                }
-            }
-
-            // Power sampling is kept on the controller thread only for publication and
-            // process attribution; the hardware counter reads happen in the sensor poller.
-            if (powerOn)
-            {
-                if (powerPrime)
-                    _power.ResetEnergyBaseline();
-
-                var power = Timed("功耗(硬件传感器/进程估算)", () => _power.Sample(
-                    cpu.PerCoreUsage ?? Array.Empty<double>(),
-                    proc.TopProcesses));
-                if (!powerPrime)
-                {
-                    snapshot.Power = power;
                 }
             }
 
@@ -487,6 +474,7 @@ namespace task_monitor
                 var procGpu = Timed("进程 GPU(PDH)", () => _procGpu.Sample(pidToName, mergeByPath, _gpu.NeedsPdhEngineData));
                 var gpu = Timed("GPU(DXCore QueryState)", () => _gpu.Sample(
                     (MetricDisplayMode)_gpuDisplayMode, _gpuDisplayIndex, _gpuTempIndex, _procGpu.EngineMap));
+                gpuPowerTopology = gpu.Gpus;
                 if (!gpuPrime)
                 {
                     snapshot.GpuAvailable = gpu.Available;
@@ -496,6 +484,32 @@ namespace task_monitor
                     snapshot.GpuTempCelsius = gpu.TempCelsius;
                     snapshot.Gpus = gpu.Gpus;
                     snapshot.TopGpuProcesses = procGpu;
+                }
+            }
+
+            // Hardware reads happen on the sensor poller; sampling the detached frame
+            // after DXCore makes the current adapter topology available for a complete
+            // core-total calculation. The power sampler itself remains the single owner
+            // of its CPU, battery and NVML worker snapshots.
+            if (powerOn)
+            {
+                if (powerPrime)
+                    _power.ResetEnergyBaseline();
+
+                if (!gpuOn)
+                    gpuPowerTopology = Timed("GPU 拓扑(DXCore)", () => _gpu.GetPowerTopology());
+
+                List<GpuInfo> topology = gpuPowerTopology;
+                var power = Timed("功耗(硬件传感器)", () => _power.Sample(topology));
+                if (!powerPrime)
+                {
+                    snapshot.Power = power;
+                }
+                else
+                {
+                    // The prime frame re-establishes provider state but must not become
+                    // the left endpoint of a later CoreTotal energy interval.
+                    _power.ResetEnergyBaseline();
                 }
             }
 

@@ -44,7 +44,7 @@ namespace task_monitor
         private int _clickDisabledMask;
         private GpuTaskbarContent _gpuContent = GpuTaskbarContent.Usage;
         private bool _gpuTempFahrenheit;
-        private PowerTaskbarSource _powerTaskbarSource = PowerTaskbarSource.Battery;
+        private PowerTaskbarSource _powerTaskbarSource = PowerTaskbarSource.Automatic;
         private bool _floatingTopmost = true;
         private bool _floatingAllowOutOfBounds;
         private bool _floatingDark;
