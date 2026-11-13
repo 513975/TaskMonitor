@@ -11,7 +11,7 @@
          it (VersionInfo.Current reads the latter at runtime; release.yml checks the tag
          against this property). src\Properties\AssemblyInfo.cs keeps only what the SDK does
          NOT generate (the WPF ThemeInfo attribute, ComVisible). -->
-    <Version>2026.11.12.1</Version>
+    <Version>2026.11.13.1</Version>
     <!-- The SDK stamps InformationalVersion with the commit hash unless this is off —
          关于页/更新检测需要纯净的 "1.0.0"。 -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
@@ -21,10 +21,10 @@
     <Copyright>Copyright © 2026 双霖 (LineSoft)</Copyright>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <LangVersion>latest</LangVersion>
-    <Platforms>AnyCPU</Platforms>
-    <!-- Keep 64-bit Windows runs 64-bit so optional vendor driver telemetry (including
-         NVIDIA's x64 NVML) can be loaded without shipping or redistributing driver DLLs. -->
-    <Prefer32Bit>false</Prefer32Bit>
+    <Platforms>x64</Platforms>
+    <!-- The release workflow publishes an x64 executable; keep its process architecture
+         aligned with the optional NVIDIA x64 NVML driver library. -->
+    <PlatformTarget>x64</PlatformTarget>
     <!-- Elevation is self-managed (first-run consent dialog + runas self-relaunch in
          App.RunElevationGate), so the manifest declares asInvoker — see src\app.manifest.
          PerMonitorV2 is declared there; App's static ctor opts WPF into per-window DPI scaling. -->
