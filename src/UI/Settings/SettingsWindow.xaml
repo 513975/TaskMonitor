@@ -342,7 +342,7 @@
                              (磁盘/GPU/网络) are SettingsExpander; CPU/内存 have none, so a
                              plain card. -->
 
-                        <!-- Section-wide option for the six detail views' process lists — first
+                        <!-- Section-wide option for the five detail views' process lists — first
                              in the section (not a per-metric switch, so a plain card). -->
                         <ui:SettingsCard Header="合并相同程序"
                                          Description="在进程列表中合并相同程序所创建的进程。"

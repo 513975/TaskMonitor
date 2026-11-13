@@ -202,6 +202,9 @@
                                HorizontalAlignment="Right"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </Grid>
+                <TextBlock Text="CPU 封装功率读取 Windows Energy Meter 的 RAPL_Package 域；AMD 专用 CPU 功率接口尚未接入"
+                           FontSize="10"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 <TextBlock x:Name="NoComponentsNotice" Text="未检测到组件功耗传感器"
                            FontSize="11" Visibility="Collapsed"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />

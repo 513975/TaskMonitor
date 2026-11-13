@@ -332,6 +332,7 @@ namespace task_monitor
             bool gpuOn = (mask & MaskGpu) != 0;
             bool netOn = (mask & MaskNet) != 0;
             bool powerOn = (mask & MaskPower) != 0;
+            bool processMetricsOn = cpuOn || ramOn || diskOn || gpuOn || netOn;
 
             // A metric that was JUST re-enabled this tick has stale delta baselines (its
             // samplers weren't called while off — a first Sample now would average the
@@ -345,22 +346,24 @@ namespace task_monitor
             bool netPrime = netOn && (prev & MaskNet) == 0;
             bool powerPrime = powerOn && (prev & MaskPower) == 0;
 
-            // svchost → 服务 naming: refresh the PID→services map once per tick (one
-            // EnumServicesStatusExW RPC — same one-call-per-tick budget as the process
-            // walk below) whenever at least one metric is on.
-            if (mask != 0) Timed("服务名刷新(EnumServicesStatusExW)", () => _serviceHosts.Refresh());
+            // svchost → 服务 naming: refresh the PID→services map only when a metric
+            // with a per-process list is enabled.
+            if (processMetricsOn)
+                Timed("服务名刷新(EnumServicesStatusExW)", () => _serviceHosts.Refresh());
 
             // The shared per-process walk feeds the CPU/RAM/磁盘 top lists, the CPU footer
-            // counts, RAM's "(compressed)" and the PID→name map for the net/GPU per-process
-            // samplers — run it unless EVERYTHING is off (it is the most expensive sampler).
-            var proc = mask != 0 ? Timed("进程枚举(NtQuerySystemInformation)", () => _procCpu.Sample(mergeByPath)) : default(ProcessSample);
+            // counts, RAM's "(compressed)" and the PID→name map for net/GPU per-process
+            // samplers. Power sampling does not consume this walk.
+            var proc = processMetricsOn
+                ? Timed("进程枚举(NtQuerySystemInformation)", () => _procCpu.Sample(mergeByPath))
+                : default(ProcessSample);
             var pidToName = proc.PidToName;
 
             var snapshot = new SystemSnapshot { NetInfo = NetInfo.Empty };
             List<GpuInfo> gpuPowerTopology = null;
 
             CpuSample cpu = default;
-            if (cpuOn || powerOn)
+            if (cpuOn)
                 cpu = Timed("CPU(PDH)", () => _cpu.Sample());
 
             if (cpuOn)
@@ -517,11 +520,14 @@ namespace task_monitor
             // final lists — after every sampler's merge — because ProcessListMerger exempts
             // svchost by its "svchost.exe" row name; renaming inside a sampler would let all
             // same-path svchost instances collapse into one merged row.
-            _serviceHosts.ApplyTo(snapshot.TopProcesses);
-            _serviceHosts.ApplyTo(snapshot.TopMemoryProcesses);
-            _serviceHosts.ApplyTo(snapshot.TopDiskProcesses);
-            _serviceHosts.ApplyTo(snapshot.TopNetProcesses);
-            _serviceHosts.ApplyTo(snapshot.TopGpuProcesses);
+            if (processMetricsOn)
+            {
+                _serviceHosts.ApplyTo(snapshot.TopProcesses);
+                _serviceHosts.ApplyTo(snapshot.TopMemoryProcesses);
+                _serviceHosts.ApplyTo(snapshot.TopDiskProcesses);
+                _serviceHosts.ApplyTo(snapshot.TopNetProcesses);
+                _serviceHosts.ApplyTo(snapshot.TopGpuProcesses);
+            }
 
             return snapshot;
         }

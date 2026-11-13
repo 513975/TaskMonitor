@@ -15,7 +15,7 @@ namespace task_monitor
     /// <remarks>
     /// Pure native boundary: returns an HBITMAP the caller owns (free via
     /// <see cref="DeleteObject"/>); the WPF <c>BitmapSource</c> conversion lives in the
-    /// UI layer (<c>ProcessIconCache</c>, shared by the six detail views' process lists),
+    /// UI layer (<c>ProcessIconCache</c>, shared by the five detail views' process lists),
     /// matching how <c>WindowInterop</c>/<c>SystemInfo</c> keep their P/Invoke surface free
     /// of WPF types.
     /// </remarks>

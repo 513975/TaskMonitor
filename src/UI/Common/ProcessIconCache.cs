@@ -8,7 +8,7 @@ using System.Windows.Media.Imaging;
 namespace task_monitor
 {
     /// <summary>
-    /// Per-exe-path icon cache shared by the six detail views' per-process lists. A view
+    /// Per-exe-path icon cache shared by the five detail views' per-process lists. A view
     /// refreshes once a second on the UI thread, so after the first tick every path is a
     /// cache hit and the icon extraction (a shell call) happens once per distinct exe while
     /// the popup is open.
