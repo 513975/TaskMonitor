@@ -193,6 +193,14 @@ namespace task_monitor
         public int? SampleIntervalMs { get; set; }
 
         /// <summary>
+        /// Windows battery-rate polling interval in ms (250 / 500 / 1000 / 2000 from
+        /// 设置 → 采样项目 → 功耗). null = 500ms, preserving the original worker cadence.
+        /// This controls how often the app queries Windows; the battery driver/firmware
+        /// may publish a new rate less often.
+        /// </summary>
+        public int? BatteryPollIntervalMs { get; set; }
+
+        /// <summary>
         /// Per-metric sampling switches (设置 → 采样, one toggle per metric). null = enabled
         /// (the default — only the disabled state is ever written). At least one metric stays
         /// enabled; a hand-edited all-off config falls back to CPU at runtime. A disabled

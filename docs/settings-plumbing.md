@@ -58,7 +58,8 @@ hand-edited all-off config falls back to CPU so the runtime mask is never zero. 
 **separate** from `TaskbarWindow._clickDisabledMask` (pinned-window press suppression) —
 unpinning must never re-enable a sampling-disabled slot. Details, including the re-enable
 baseline priming: [`gotchas.md` §25](gotchas.md#25-per-metric-sampling-switches-use-a-mask-separate-from-the-pinned-window-click-mask).
-The optional NVIDIA GPU-power worker follows the 功耗 sampling switch.
+The optional NVIDIA GPU-power worker and the separate configurable Windows battery-rate worker
+(500 ms by default) follow the 功耗 sampling switch.
 
 ## 3. 磁盘 / GPU 显示方式 — `DiskDisplay` + `DiskDisplayIndex`, `GpuDisplay` + `GpuDisplayIndex`
 
@@ -291,6 +292,18 @@ Every overlay, including newly created or rebuilt displays, receives the same se
 always `功耗`.
 Manual battery mode retains the signed flow presentation: charging is prefixed `+`, discharging
 `-`, and an idle battery shows `0.0W`.
+
+## 15. 电池功率轮询间隔 — `BatteryPollIntervalMs` (null = 500ms)
+
+| | |
+|---|---|
+| Setter | `SettingsWindow` → `App.OnBatteryPollIntervalChanged` → `SamplingController.SetBatteryPollInterval` |
+| Sampler state | `SamplingController` retains the value for sampler rebuilds; it is forwarded through `SystemSampler` and `PowerSampler` to `BatteryPowerSensorSampler` |
+| WM_APP | **no** — the independent battery worker is woken and applies the new cadence immediately |
+
+设置 → 采样项目 → 功耗 offers 250/500/1000/2000ms. App stores only values other than 500ms;
+the interval controls how often the app queries Windows, while the battery driver/EC/firmware
+may publish a new rate less often.
 
 ## Not in settings.yaml at all
 

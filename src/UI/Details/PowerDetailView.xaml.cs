@@ -57,9 +57,9 @@ namespace task_monitor
             GpuInputWattsText.ToolTip = power.GpuPowerAvailability;
             BatteryStatusRun.Text = FormatBatteryStatus(power);
             BatteryStatusTextBlock.ToolTip = string.IsNullOrWhiteSpace(power.BatterySource)
-                ? null : power.SampleTimeUtc == default(DateTime)
+                ? null : power.BatterySampleTimeUtc == default(DateTime)
                     ? power.BatterySource
-                    : $"{power.BatterySource}\n更新时间：{power.SampleTimeUtc.ToLocalTime():HH:mm:ss}";
+                    : $"{power.BatterySource}\n最近查询：{power.BatterySampleTimeUtc.ToLocalTime():HH:mm:ss}";
             PowerUnavailableNotice.Visibility = power.CpuPackageWatts.HasValue
                 ? Visibility.Collapsed : Visibility.Visible;
             PowerUnavailableText.Text = power.AvailabilityMessage;

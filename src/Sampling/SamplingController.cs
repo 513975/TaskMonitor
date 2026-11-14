@@ -42,6 +42,7 @@ namespace task_monitor
         private volatile string _clashApiAddress;
         private volatile string _clashApiSecret;
         private volatile bool _publicIpLookupEnabled = true;
+        private volatile int _batteryPollIntervalMs = 500;
 
         public SystemSnapshot LatestSnapshot => _latestSnapshot;
         public long LastTickTickCount;
@@ -96,6 +97,16 @@ namespace task_monitor
         {
             _sampleIntervalMs = Math.Max(MinSampleIntervalMs, Math.Min(MaxSampleIntervalMs, ms));
             _wake.Set();
+        }
+
+        public void SetBatteryPollInterval(int ms)
+        {
+            int interval = BatteryPowerSensorSampler.NormalizePollInterval(ms);
+            lock (_samplerSync)
+            {
+                _batteryPollIntervalMs = interval;
+                _sampler?.SetBatteryPollInterval(interval);
+            }
         }
 
         public void SetEnabledMask(int mask)
@@ -254,6 +265,7 @@ namespace task_monitor
             sampler.SetDiskDisplay(_diskDisplayMode, _diskDisplayIndex);
             sampler.SetGpuDisplay(_gpuDisplayMode, _gpuDisplayIndex);
             sampler.SetGpuTempConfig(_gpuTempIndex, _gpuTempFahrenheit);
+            sampler.SetBatteryPollInterval(_batteryPollIntervalMs);
             sampler.SetNetAdapter(_netAdapterId);
             sampler.SetClashApi(_clashEnabled, _clashApiAddress, _clashApiSecret);
             sampler.SetPublicIpLookup(_publicIpLookupEnabled);

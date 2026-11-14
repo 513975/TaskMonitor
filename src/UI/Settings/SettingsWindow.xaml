@@ -505,6 +505,16 @@
                                         <ComboBoxItem Content="电池功耗" />
                                     </ComboBox>
                                 </ui:SettingsCard>
+                                <ui:SettingsCard Header="电池功率轮询间隔"
+                                                 Description="控制应用查询 Windows 电池功率的频率。屏幕刷新还受“通用 → 采样间隔”影响；电池驱动、EC 或固件也可能以更慢的速度更新读数。">
+                                    <ComboBox x:Name="BatteryIntervalCombo" MinWidth="140"
+                                              SelectionChanged="BatteryIntervalCombo_SelectionChanged">
+                                        <ComboBoxItem Content="0.25 秒" />
+                                        <ComboBoxItem Content="0.5 秒（默认）" />
+                                        <ComboBoxItem Content="1 秒" />
+                                        <ComboBoxItem Content="2 秒" />
+                                    </ComboBox>
+                                </ui:SettingsCard>
                             </ui:SettingsExpander.Items>
                         </ui:SettingsExpander>
 

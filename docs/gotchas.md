@@ -1380,9 +1380,15 @@ Window / Popup 模板、预热窗口、设置窗口和不可见菜单宿主正�
 当前修复针对已确认的代码风险；除非用户机器的日志能对应这些路径，否则不把它表述成该
 游戏本偶发断档的唯一根因。
 
-## 50. 任务栏自动功耗按 AC 在线状态切换
+## 50. 电池功率独立轮询；任务栏自动功耗按 AC 在线状态切换
 
 *`src/Sampling/PowerSampler.cs`、`src/UI/TaskbarWindow.cs`*
+
+Windows 电池 Rate 与 CPU RAPL 使用独立 worker：电池 API 默认每 500ms 查询一次，可在
+设置 → 采样项目 → 功耗调整为 250/500/1000/2000ms，不能排在 RAPL 计数器读取之后；
+设置变化唤醒 worker 并即时应用。详情页显示电池 worker 自己的最近查询时间。该频率只
+提高应用的查询频率，不能强迫 Windows 电池驱动、EC 或固件更快刷新底层 Rate；电池开关
+关闭时 worker 必须进入等待状态。
 
 笔记本高负载时可能同时连接适配器并从电池取电。`BatteryState == Discharging` 因而不能
 用来推断“正在离电”；自动模式必须看 `CallNtPowerInformation(SystemBatteryState)` 的

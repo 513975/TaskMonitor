@@ -73,16 +73,12 @@ never proves "we never wrote it".
 
 ## 发布 / CI/CD
 
-**GitHub 是主仓库，CNB 是镜像。** `origin` = GitHub（SSH），`cnb` = CNB（HTTPS——CNB **不支持 SSH**，认证 = 固定用户名 `cnb` + 访问令牌）。日常只推 `origin`；`.github/workflows/` 两个 workflow 负责同步与发布（细节看 workflow 本身）：
+**GitHub 是主仓库，CNB 是镜像。** `origin` = 上游 GitHub（SSH），`cnb` = CNB（HTTPS，固定用户 `cnb` + token）。两个 workflow 仅在 `linesoft2/TaskMonitor` 执行 CNB 操作；fork 仍可创建 GitHub Release。
 
-- `sync-cnb.yml`（main + v* tag）→ `git-sync` 把代码和 tag **force** 推到 CNB（CNB 是纯镜像，从无独有提交）。
-- `release.yml`（v* tag）→ 校验 tag 与 csproj `<Version>` 一致（不一致直接 fail）→ `dotnet build -c Release` → `gh release create` → `tools/publish-cnb-release.ps1` 建 CNB release 并上传 `task_monitor-<tag>-x64.exe`。Secret `CNB_TOKEN` 需 repo-code + repo-contents 两个读写 scope。
+- `sync-cnb.yml`（main + v* tag）→ `git-sync` force 同步。
+- `release.yml`（v* tag）→ 校验版本与 changelog → Windows Release build → GitHub Release；官方仓库再建 CNB release 并上传 x64 exe。`CNB_TOKEN` 需 repo-code + repo-contents 读写权限。
 
-发布 = **先改 `task_monitor.csproj` 的 `<Version>`**（版本号唯一来源——SDK 据它生成
-`AssemblyInformationalVersion`，关于页与更新检测读它），并在 `CHANGELOG.md` 写好该 tag 的
-`## <tag>` 段落（release 文案从这里提取，缺失/为空直接 fail），再 `git tag vX.Y.Z && git
-push origin vX.Y.Z`，之后全自动。CNB 云端集群全是 Linux 节点跑不了 net48 WPF，所以构建放在 GitHub 托管
-Windows runner。`publish-cnb-release.ps1` 的三个坑（勿回退，见脚本注释）：CNB API 必须显式
+发布 = 改 `task_monitor.csproj` 的 `<Version>`，在 `CHANGELOG.md` 写非空 `## vX.Y.Z` 段落，再推送该 tag。版本号是唯一来源，SDK 生成 `AssemblyInformationalVersion`，关于页与更新检测读取它。CNB Linux 无法构建 net48 WPF，故用 GitHub Windows runner。`publish-cnb-release.ps1` 的三个坑（勿回退，见脚本注释）：CNB API 必须显式
 `Accept: application/json`；PUT/确认必须走 curl.exe（`System.Uri` 会解码 %2F 导致 500）；保持
 **UTF-8 BOM**（PowerShell 5.1 会按 GBK 误读）。
 
@@ -204,7 +200,7 @@ statement is a comment at the code site named there. Companion: [`settings-plumb
 43. **窗口死后必须退出消息循环；僵尸要自愈** — 裸 `WM_NCDESTROY` 也 teardown+quit；foreign calls 走有界 worker（`SetParent` inline）；entry 清理 worker/trace；watchdog 5s 唤醒、45s 重启。
 48. **UAC/锁屏后 WPF 停渲染** — 首窗前设 `ShadowAssist.UseBitmapCache=false`；触屏临时缓存服从同一开关。
 49. **RAPL 单域恢复；Package 暂存标记，任务栏隐藏；多 Package 汇总必须完整** — gotchas §49。
-50. **任务栏自动功耗按 AC 在线切换；不看电池放电** — gotchas §50。
+50. **电池功率独立可调轮询（默认 500ms）；自动功耗按 AC 在线切换** — gotchas §50。
 51. **功耗图沿用全宽历史图样式、全曲线填充；核心 Wh 只积完整读数** — gotchas §51。
 52. **任务栏功耗单元按值宽度扩展；绘制与命中共用布局** — gotchas §52。
 

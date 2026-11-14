@@ -41,8 +41,8 @@ namespace task_monitor
 
     /// <summary>
     /// Detached hardware readings. The sampler reads Windows' built-in Energy Meter
-    /// performance counters (EMI/RAPL) and aggregate battery status API; NVIDIA GPU
-    /// power is published separately by the optional NVML worker.
+    /// performance counters (EMI/RAPL); battery status and NVIDIA GPU power are published
+    /// separately by their respective workers.
     /// </summary>
     internal sealed class PowerSensorFrame
     {
@@ -50,6 +50,22 @@ namespace task_monitor
         public string CpuPackageSource;
         public bool CpuPackageStale;
         public DateTime CpuPackageSampleTimeUtc;
+        public long SampleTimestamp;
+        public List<PowerComponentReading> Components = new List<PowerComponentReading>();
+        public string AvailabilityMessage = "等待 Windows Energy Meter / RAPL 功率数据";
+
+        public static readonly PowerSensorFrame Empty = new PowerSensorFrame
+        {
+            AvailabilityMessage = "等待 Windows Energy Meter / RAPL 功率数据",
+        };
+    }
+
+    /// <summary>
+    /// Battery state is polled independently from RAPL so a slow performance-counter
+    /// provider cannot delay the discharge reading.
+    /// </summary>
+    internal sealed class BatteryPowerFrame
+    {
         public bool? AcOnLine;
         public bool? BatteryPresent;
         public double? BatteryPowerWatts;
@@ -57,13 +73,8 @@ namespace task_monitor
         public string BatterySource;
         public DateTime SampleTimeUtc;
         public long SampleTimestamp;
-        public List<PowerComponentReading> Components = new List<PowerComponentReading>();
-        public string AvailabilityMessage = "等待 Windows 硬件功率传感器";
 
-        public static readonly PowerSensorFrame Empty = new PowerSensorFrame
-        {
-            AvailabilityMessage = "等待 Windows Energy Meter / RAPL 功率数据",
-        };
+        public static readonly BatteryPowerFrame Empty = new BatteryPowerFrame();
     }
 
     internal sealed class PowerSnapshot
@@ -72,9 +83,9 @@ namespace task_monitor
         public PowerValueKind CpuPackageKind;
         public string CpuPackageSource = "";
         public DateTime CpuPackageSampleTimeUtc;
-        public DateTime SampleTimeUtc;
         public bool? AcOnLine;
         public bool? BatteryPresent;
+        public DateTime BatterySampleTimeUtc;
         public double? CpuPackagePeakWatts; // max of the most recent 60 published power samples
         public string AvailabilityMessage = "";
         public double?[] CpuPackageHistory = Array.Empty<double?>();
@@ -100,10 +111,9 @@ namespace task_monitor
     }
 
     /// <summary>
-    /// Reads Windows Energy Meter / RAPL counters and the OS battery rate.
+    /// Reads Windows Energy Meter / RAPL counters.
     /// Counter inventory and per-domain recovery invariants: docs/gotchas.md §49.
-    /// On Intel systems, Windows publishes RAPL domains in milliwatts. Battery rate remains
-    /// a battery-side flow and is never substituted for CPU or system power.
+    /// On Intel systems, Windows publishes RAPL domains in milliwatts.
     /// </summary>
     internal sealed class HardwarePowerSensorSampler
     {
@@ -189,6 +199,9 @@ namespace task_monitor
 
                     Publish(frame);
                     int elapsed = (int)((Stopwatch.GetTimestamp() - start) * 1000L / Stopwatch.Frequency);
+                    if (elapsed >= 150)
+                        Logger.WarnOnce("rapl-power-slow",
+                            $"Windows 硬件功率查询耗时 {elapsed}ms");
                     _wake.WaitOne(Math.Max(1, PollIntervalMs - elapsed));
                 }
             }
@@ -343,91 +356,15 @@ namespace task_monitor
                     "Windows Energy Meter / Intel RAPL " + domain.Key));
             }
 
-            try
-            {
-                ReadBattery(frame);
-            }
-            catch (Exception ex)
-            {
-                // Battery API failures are independent from RAPL; do not invalidate CPU
-                // counters because the platform battery provider failed this sample.
-                Logger.WarnOnce("battery-power-read",
-                    "读取 Windows 电池功率失败；CPU RAPL 采样继续", ex);
-            }
             UpdateAvailability(frame);
             return frame;
         }
 
-        private static void ReadBattery(PowerSensorFrame frame)
-        {
-            if (!BatteryPowerInterop.TryRead(out BatteryPowerInterop.State battery))
-                return;
-
-            // Only successful API output is authoritative. The native struct is
-            // zero-initialized before the call, so never infer offline from a default
-            // value when TryRead failed.
-            if (battery.AcOnLine <= 1)
-                frame.AcOnLine = battery.AcOnLine != 0;
-            frame.BatteryPresent = battery.BatteryPresent != 0;
-
-            if (battery.BatteryPresent == 0)
-            {
-                frame.BatterySource = "Windows Battery API · 未检测到电池";
-                return;
-            }
-
-            frame.BatterySource = "Windows Battery API / CallNtPowerInformation";
-            // Native Rate is ULONG, but providers use the high bit as a signed
-            // discharge value. 0x80000000 is the documented unknown sentinel.
-            if (battery.Rate == 0x80000000U)
-            {
-                if (battery.Charging != 0 && battery.Discharging == 0)
-                    frame.BatteryState = BatteryFlowState.Charging;
-                else if (battery.Discharging != 0 && battery.Charging == 0)
-                    frame.BatteryState = BatteryFlowState.Discharging;
-                return;
-            }
-
-            int signedRate = unchecked((int)battery.Rate);
-            if (signedRate == 0)
-            {
-                // Zero is a valid no-flow state only when the aggregate flags agree.
-                if (battery.Charging != 0 && battery.Discharging == 0)
-                    frame.BatteryState = BatteryFlowState.Charging;
-                else if (battery.Discharging != 0 && battery.Charging == 0)
-                    frame.BatteryState = BatteryFlowState.Discharging;
-                else if (battery.Charging == 0 && battery.Discharging == 0)
-                    frame.BatteryState = BatteryFlowState.Idle;
-                return;
-            }
-
-            bool isCharging = signedRate > 0;
-            // Rate's sign carries direction. If the status flags contradict it, wait for
-            // a consistent sample rather than publishing a misleading direction.
-            if ((isCharging && battery.Discharging != 0 && battery.Charging == 0)
-                || (!isCharging && battery.Charging != 0 && battery.Discharging == 0))
-                return;
-
-            double watts = Math.Abs((double)signedRate) / 1000.0;
-            frame.BatteryState = isCharging
-                ? BatteryFlowState.Charging
-                : BatteryFlowState.Discharging;
-            if (watts <= 0 || watts > MaxPowerWatts)
-                return;
-
-            frame.BatteryPowerWatts = watts;
-        }
-
         private static void UpdateAvailability(PowerSensorFrame frame)
         {
-            if (frame.CpuPackageWatts.HasValue && frame.BatteryPowerWatts.HasValue)
-                frame.AvailabilityMessage = "已读取 CPU 封装功率与电池充放电功率。";
-            else if (frame.CpuPackageWatts.HasValue)
-                frame.AvailabilityMessage = "已读取 CPU 封装功率；当前没有可用的电池功率读数。";
-            else if (frame.BatteryPowerWatts.HasValue || frame.BatteryState != BatteryFlowState.Unavailable)
-                frame.AvailabilityMessage = "当前没有可用的 CPU 封装功率；电池读数仅表示电池充放电功率。";
-            else
-                frame.AvailabilityMessage = "Windows 未提供有效的 CPU RAPL 封装或电池功率读数。";
+            frame.AvailabilityMessage = frame.CpuPackageWatts.HasValue
+                ? "已读取 CPU 封装功率。"
+                : "Windows 未提供有效的 CPU RAPL 封装功率。";
         }
 
         private static bool TryParseRaplInstance(string instance, out string domain)
@@ -535,10 +472,7 @@ namespace task_monitor
         private void Publish(PowerSensorFrame frame)
         {
             if (!ReferenceEquals(frame, PowerSensorFrame.Empty))
-            {
-                frame.SampleTimeUtc = DateTime.UtcNow;
                 frame.SampleTimestamp = Stopwatch.GetTimestamp();
-            }
             LogTransition(frame.AvailabilityMessage, null, null);
             Volatile.Write(ref _latest, frame);
         }
@@ -595,11 +529,215 @@ namespace task_monitor
         }
     }
 
+    /// <summary>
+    /// Polls Windows' aggregate battery rate independently from RAPL. The OS battery
+    /// provider may still return a firmware-cached rate, but a slow RAPL query can no
+    /// longer postpone this poll.
+    /// </summary>
+    internal sealed class BatteryPowerSensorSampler
+    {
+        private const int DefaultPollIntervalMs = 500;
+        private const int StopJoinMs = 1500;
+        private const double MaxPowerWatts = 2000;
+
+        private readonly AutoResetEvent _wake = new AutoResetEvent(false);
+        private readonly Thread _thread;
+        private BatteryPowerFrame _latest = BatteryPowerFrame.Empty;
+        private int _pollIntervalMs = DefaultPollIntervalMs;
+        private volatile bool _enabled;
+        private volatile bool _stopping;
+        private string _lastStatus;
+
+        public BatteryPowerFrame Latest => Volatile.Read(ref _latest);
+
+        internal static int NormalizePollInterval(int intervalMs)
+        {
+            switch (intervalMs)
+            {
+                case 250:
+                case 500:
+                case 1000:
+                case 2000:
+                    return intervalMs;
+                default:
+                    return DefaultPollIntervalMs;
+            }
+        }
+
+        public BatteryPowerSensorSampler()
+        {
+            _thread = new Thread(PollLoop)
+            {
+                IsBackground = true,
+                Name = "BatteryPowerSensorSampler",
+            };
+            _thread.SetApartmentState(ApartmentState.MTA);
+            _thread.Start();
+        }
+
+        public void SetEnabled(bool enabled)
+        {
+            _enabled = enabled;
+            if (!enabled)
+                Publish(BatteryPowerFrame.Empty);
+            _wake.Set();
+        }
+
+        public void SetPollInterval(int intervalMs)
+        {
+            Volatile.Write(ref _pollIntervalMs, NormalizePollInterval(intervalMs));
+            _wake.Set();
+        }
+
+        private void PollLoop()
+        {
+            try
+            {
+                while (!_stopping)
+                {
+                    if (!_enabled)
+                    {
+                        _wake.WaitOne(Volatile.Read(ref _pollIntervalMs));
+                        continue;
+                    }
+
+                    long start = Stopwatch.GetTimestamp();
+                    BatteryPowerFrame frame;
+                    try
+                    {
+                        frame = ReadFrame();
+                        if (frame.SampleTimestamp == 0)
+                            Logger.WarnOnce("battery-power-read",
+                                "读取 Windows 电池功率失败；将继续重试");
+                    }
+                    catch (Exception ex)
+                    {
+                        frame = BatteryPowerFrame.Empty;
+                        Logger.WarnOnce("battery-power-read",
+                            "读取 Windows 电池功率失败；将继续重试", ex);
+                    }
+
+                    Publish(frame);
+                    int elapsed = (int)((Stopwatch.GetTimestamp() - start) * 1000L / Stopwatch.Frequency);
+                    if (elapsed >= 150)
+                        Logger.WarnOnce("battery-power-slow",
+                            $"Windows 电池功率查询耗时 {elapsed}ms；请检查电池驱动或固件响应");
+                    int intervalMs = Volatile.Read(ref _pollIntervalMs);
+                    _wake.WaitOne(Math.Max(1, intervalMs - elapsed));
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.WarnOnce("battery-power-sampler",
+                    "电池功率采样线程异常退出", ex);
+            }
+            finally
+            {
+                Volatile.Write(ref _latest, BatteryPowerFrame.Empty);
+            }
+        }
+
+        private static BatteryPowerFrame ReadFrame()
+        {
+            if (!BatteryPowerInterop.TryRead(out BatteryPowerInterop.State battery))
+                return BatteryPowerFrame.Empty;
+
+            var frame = new BatteryPowerFrame
+            {
+                SampleTimeUtc = DateTime.UtcNow,
+                SampleTimestamp = Stopwatch.GetTimestamp(),
+                AcOnLine = battery.AcOnLine <= 1 ? battery.AcOnLine != 0 : (bool?)null,
+                BatteryPresent = battery.BatteryPresent != 0,
+            };
+
+            if (battery.BatteryPresent == 0)
+            {
+                frame.BatterySource = "Windows Battery API · 未检测到电池";
+                return frame;
+            }
+
+            frame.BatterySource = "Windows Battery API / CallNtPowerInformation";
+            // Native Rate is ULONG, but providers use the high bit as a signed
+            // discharge value. 0x80000000 is the documented unknown sentinel.
+            if (battery.Rate == 0x80000000U)
+            {
+                if (battery.Charging != 0 && battery.Discharging == 0)
+                    frame.BatteryState = BatteryFlowState.Charging;
+                else if (battery.Discharging != 0 && battery.Charging == 0)
+                    frame.BatteryState = BatteryFlowState.Discharging;
+                return frame;
+            }
+
+            int signedRate = unchecked((int)battery.Rate);
+            if (signedRate == 0)
+            {
+                // Zero is a valid no-flow state only when the aggregate flags agree.
+                if (battery.Charging != 0 && battery.Discharging == 0)
+                    frame.BatteryState = BatteryFlowState.Charging;
+                else if (battery.Discharging != 0 && battery.Charging == 0)
+                    frame.BatteryState = BatteryFlowState.Discharging;
+                else if (battery.Charging == 0 && battery.Discharging == 0)
+                    frame.BatteryState = BatteryFlowState.Idle;
+                return frame;
+            }
+
+            bool isCharging = signedRate > 0;
+            // Rate's sign carries direction. If the status flags contradict it, wait for
+            // a consistent sample rather than publishing a misleading direction.
+            if ((isCharging && battery.Discharging != 0 && battery.Charging == 0)
+                || (!isCharging && battery.Charging != 0 && battery.Discharging == 0))
+                return frame;
+
+            double watts = Math.Abs((double)signedRate) / 1000.0;
+            frame.BatteryState = isCharging
+                ? BatteryFlowState.Charging
+                : BatteryFlowState.Discharging;
+            if (watts > 0 && watts <= MaxPowerWatts)
+                frame.BatteryPowerWatts = watts;
+            return frame;
+        }
+
+        private void Publish(BatteryPowerFrame frame)
+        {
+            frame = frame ?? BatteryPowerFrame.Empty;
+            LogTransition(frame);
+            Volatile.Write(ref _latest, frame);
+        }
+
+        private void LogTransition(BatteryPowerFrame frame)
+        {
+            string status = frame.SampleTimestamp == 0
+                ? "Windows 电池功率接口暂时不可用"
+                : frame.BatteryPresent != true
+                    ? "Windows 电池 API 未检测到电池"
+                    : "Windows 电池 API 状态读取成功";
+            if (string.Equals(_lastStatus, status, StringComparison.Ordinal))
+                return;
+            _lastStatus = status;
+            Logger.Info("电池功率数据状态：" + status);
+        }
+
+        public bool Shutdown()
+        {
+            _stopping = true;
+            _wake.Set();
+            if (Thread.CurrentThread == _thread) return true;
+            if (_thread.Join(StopJoinMs))
+            {
+                _wake.Dispose();
+                return true;
+            }
+            Logger.Warn($"电池功率采样停止等待超时（{StopJoinMs}ms）");
+            return false;
+        }
+    }
+
     internal sealed class PowerSampler
     {
         private const int HistoryCapacity = 60;
         // Rolling peak windows and CoreTotal integration/gap semantics: docs/gotchas.md §51.
         private readonly HardwarePowerSensorSampler _sensor = new HardwarePowerSensorSampler();
+        private readonly BatteryPowerSensorSampler _batterySensor = new BatteryPowerSensorSampler();
         private readonly NvmlGpuPowerSampler _gpuSensor = new NvmlGpuPowerSampler();
         private readonly Queue<double?> _packageHistory = new Queue<double?>(HistoryCapacity);
         private readonly Queue<double?> _batteryHistory = new Queue<double?>(HistoryCapacity);
@@ -615,7 +753,13 @@ namespace task_monitor
         private double? _lastBatteryWatts;
         private long _lastBatteryTimestamp;
 
-        public void SetEnabled(bool enabled) => _sensor.SetEnabled(enabled);
+        public void SetEnabled(bool enabled)
+        {
+            _sensor.SetEnabled(enabled);
+            _batterySensor.SetEnabled(enabled);
+        }
+        public void SetBatteryPollInterval(int intervalMs)
+            => _batterySensor.SetPollInterval(intervalMs);
         public void SetGpuEnabled(bool enabled) => _gpuSensor.SetEnabled(enabled);
 
         /// <summary>
@@ -641,11 +785,16 @@ namespace task_monitor
         {
             long now = Stopwatch.GetTimestamp();
             PowerSensorFrame frame = _sensor.Latest ?? PowerSensorFrame.Empty;
+            BatteryPowerFrame batteryFrame = _batterySensor.Latest ?? BatteryPowerFrame.Empty;
             NvmlGpuPowerFrame gpuFrame = _gpuSensor.Latest ?? NvmlGpuPowerFrame.Empty;
             bool sensorFresh = IsFresh(frame.SampleTimestamp, now);
             double? package = sensorFresh ? frame.CpuPackageWatts : (double?)null;
-            BatteryFlowState batteryState = sensorFresh ? frame.BatteryState : BatteryFlowState.Unavailable;
-            double? batteryWatts = sensorFresh ? frame.BatteryPowerWatts : (double?)null;
+            bool batteryFresh = IsFresh(batteryFrame.SampleTimestamp, now);
+            BatteryFlowState batteryState = batteryFresh
+                ? batteryFrame.BatteryState : BatteryFlowState.Unavailable;
+            double? batteryWatts = batteryFresh ? batteryFrame.BatteryPowerWatts : (double?)null;
+            bool batteryAvailable = batteryFresh && batteryFrame.BatteryPresent == true
+                && (batteryWatts.HasValue || batteryState != BatteryFlowState.Unavailable);
 
             var components = sensorFresh
                 ? new List<PowerComponentReading>(frame.Components)
@@ -706,15 +855,16 @@ namespace task_monitor
                     : frame.CpuPackageStale ? PowerValueKind.Stale : PowerValueKind.Measured,
                 CpuPackageSource = sensorFresh ? frame.CpuPackageSource ?? "" : "",
                 CpuPackageSampleTimeUtc = sensorFresh ? frame.CpuPackageSampleTimeUtc : default(DateTime),
-                SampleTimeUtc = sensorFresh ? frame.SampleTimeUtc : default(DateTime),
+                BatterySampleTimeUtc = batteryFresh ? batteryFrame.SampleTimeUtc : default(DateTime),
                 CpuPackagePeakWatts = Maximum(_packageHistory),
-                AvailabilityMessage = sensorFresh ? frame.AvailabilityMessage : "硬件功率读数已过期或不可用。",
+                AvailabilityMessage = BuildAvailabilityMessage(
+                    package.HasValue, batteryAvailable, sensorFresh, batteryFresh),
                 CpuPackageHistory = _packageHistory.ToArray(),
-                AcOnLine = sensorFresh ? frame.AcOnLine : (bool?)null,
-                BatteryPresent = sensorFresh ? frame.BatteryPresent : (bool?)null,
+                AcOnLine = batteryFresh ? batteryFrame.AcOnLine : (bool?)null,
+                BatteryPresent = batteryFresh ? batteryFrame.BatteryPresent : (bool?)null,
                 BatteryPowerWatts = batteryWatts,
                 BatteryState = batteryState,
-                BatterySource = sensorFresh ? frame.BatterySource ?? "" : "",
+                BatterySource = batteryFresh ? batteryFrame.BatterySource ?? "" : "",
                 BatteryAverageWatts = batteryState == BatteryFlowState.Charging
                     ? Average(_batteryChargeHistory)
                     : batteryState == BatteryFlowState.Discharging
@@ -856,8 +1006,23 @@ namespace task_monitor
         public bool Shutdown()
         {
             bool cpuStopped = _sensor.Shutdown();
+            bool batteryStopped = _batterySensor.Shutdown();
             bool gpuStopped = _gpuSensor.Shutdown();
-            return cpuStopped && gpuStopped;
+            return cpuStopped && batteryStopped && gpuStopped;
+        }
+
+        private static string BuildAvailabilityMessage(
+            bool packageAvailable, bool batteryAvailable, bool sensorFresh, bool batteryFresh)
+        {
+            if (packageAvailable && batteryAvailable)
+                return "已读取 CPU 封装功率与电池充放电功率。";
+            if (packageAvailable)
+                return "已读取 CPU 封装功率；当前没有可用的电池功率读数。";
+            if (batteryAvailable)
+                return "当前没有可用的 CPU 封装功率；电池读数仅表示电池充放电功率。";
+            if (!sensorFresh && !batteryFresh)
+                return "硬件功率读数已过期或不可用。";
+            return "Windows 未提供有效的 CPU RAPL 封装或电池功率读数。";
         }
 
         private static double? Average(IEnumerable<double?> values)

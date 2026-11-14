@@ -380,6 +380,7 @@ namespace task_monitor
             _taskbars.SetGpuTempDisplay(_config.GpuTaskbarContent ?? GpuTaskbarContent.Usage,
                 _config.GpuTempIndex ?? -1, _config.GpuTempUnit == GpuTempUnit.Fahrenheit);
             _taskbars.SetPowerTaskbarSource(_config.PowerTaskbarSource ?? PowerTaskbarSource.Automatic);
+            _sampling.SetBatteryPollInterval(_config.BatteryPollIntervalMs ?? 500);
             _sampling.SetNetAdapter(_config.NetAdapterId);
             _sampling.SetClashApi(_config.ClashEnabled != false, _config.ClashApiAddress, _config.ClashApiSecret);
             _sampling.SetPublicIpLookup(_config.PublicIpEnabled != false);
@@ -751,6 +752,7 @@ namespace task_monitor
                 _config.SampleIntervalMs ?? 1000, OnSampleIntervalChanged,
                 SamplingMaskOf(_config), OnMetricSamplingChanged,
                 PowerTaskbarSourceIndexOf(_config), OnPowerTaskbarSourceChanged,
+                _config.BatteryPollIntervalMs ?? 500, OnBatteryPollIntervalChanged,
                 _config.MergeSamePathProcesses != false, OnMergeSamePathChanged,
                 // The 特定磁盘 picker's items come from the latest snapshot's disk list
                 // (empty while disk sampling is off — the picker then keeps only the
@@ -973,6 +975,13 @@ namespace task_monitor
             _config.SampleIntervalMs = ms == 1000 ? (int?)null : ms;
             TrySaveConfig();
             _taskbars.SetSampleInterval(ms);
+        }
+
+        private void OnBatteryPollIntervalChanged(int ms)
+        {
+            _config.BatteryPollIntervalMs = ms == 500 ? (int?)null : ms;
+            TrySaveConfig();
+            _sampling.SetBatteryPollInterval(ms);
         }
 
         // 合并相同程序 toggle: persist (null = on, the default — only the disabled state

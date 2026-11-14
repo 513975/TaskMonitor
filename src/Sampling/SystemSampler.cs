@@ -175,6 +175,9 @@ namespace task_monitor
             _power.SetGpuEnabled(powerEnabled);
         }
 
+        /// <summary>Set the Windows battery-rate worker's polling cadence (ms).</summary>
+        public void SetBatteryPollInterval(int ms) => _power.SetBatteryPollInterval(ms);
+
         // 设置 → 采样项目 → 合并相同程序 — same volatile single-writer contract as
         // _enabledMask (written via TaskbarWindow.SetMergeSamePathProcesses). Read each
         // tick and handed to the per-process samplers, which merge same-exe-path rows

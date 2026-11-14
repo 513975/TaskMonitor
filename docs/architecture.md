@@ -103,8 +103,11 @@ each expected thread, excluding cancelled entries and those legitimately waiting
 `SystemSampler.Timed` still names slow sampler steps; `CrashTrace` and native stacks identify the
 specific stalled thread. SRUM unregistration belongs to sampler retirement, never HWND teardown.
 
-The power sampler reads Windows Energy Meter / Intel RAPL domains and
-`CallNtPowerInformation(SystemBatteryState)` on its own polling worker. RAPL instances are
+The power sampler reads Windows Energy Meter / Intel RAPL domains on one worker and
+`CallNtPowerInformation(SystemBatteryState)` on a separate worker (configurable at 250 / 500 /
+1000 / 2000 ms; default 500 ms), so a slow RAPL counter cannot delay the battery poll. The
+battery worker's shorter cadence does not force the OS battery provider, EC, or firmware to
+refresh its reported rate more often. RAPL instances are
 re-enumerated once per minute and retried at a low cadence when none are available, so provider
 changes can be picked up without adding enumeration to every sample. Unchanged counter handles stay
 open across inventory scans; a transient failure in one child domain does not release the other

@@ -57,6 +57,7 @@ namespace task_monitor
         private readonly Action<bool> _floatingFullscreenHideChanged; // 悬浮模式 → 全屏时隐藏
         private readonly Action<double> _floatingOpacityChanged; // 悬浮模式 → 透明度 (0.2–1.0)
         private readonly Action<int> _intervalChanged;        // ms: 500 / 1000 / 2000
+        private readonly Action<int> _batteryPollIntervalChanged; // ms: 250 / 500 / 1000 / 2000
         private readonly Action<int, bool> _samplingChanged;  // (overlay hit slot 0–5, enabled)
         private readonly Action<int> _powerTaskbarSourceChanged; // 0=自动 1=核心总功耗 2=CPU封装 3=电池
         private readonly Action<bool> _mergeSamePathChanged;  // 合并相同程序
@@ -200,6 +201,7 @@ namespace task_monitor
             int intervalMs, Action<int> intervalChanged,
             int samplingMask, Action<int, bool> samplingChanged,
             int powerTaskbarSourceIndex, Action<int> powerTaskbarSourceChanged,
+            int batteryPollIntervalMs, Action<int> batteryPollIntervalChanged,
             bool mergeSamePath, Action<bool> mergeSamePathChanged,
             int diskDisplayIndex, int pickedDiskIndex, IReadOnlyList<DiskInfo> disks,
             Action<int, int> diskDisplayChanged,
@@ -234,6 +236,7 @@ namespace task_monitor
             _intervalChanged = intervalChanged;
             _samplingChanged = samplingChanged;
             _powerTaskbarSourceChanged = powerTaskbarSourceChanged;
+            _batteryPollIntervalChanged = batteryPollIntervalChanged;
             _mergeSamePathChanged = mergeSamePathChanged;
             _diskDisplayChanged = diskDisplayChanged;
             _gpuDisplayChanged = gpuDisplayChanged;
@@ -307,6 +310,7 @@ namespace task_monitor
             PowerSwitch.IsOn = (samplingMask & SystemSampler.MaskPower) != 0;
             PowerSourceCombo.SelectedIndex = powerTaskbarSourceIndex < 0 || powerTaskbarSourceIndex > 3
                 ? 0 : powerTaskbarSourceIndex;
+            BatteryIntervalCombo.SelectedIndex = BatteryIntervalToIndex(batteryPollIntervalMs);
             MergeSwitch.IsOn = mergeSamePath;
             DiskDisplayCombo.SelectedIndex = diskDisplayIndex < 0 || diskDisplayIndex > 2 ? 0 : diskDisplayIndex;
             PopulateDiskPicker(disks, pickedDiskIndex);
@@ -707,6 +711,10 @@ namespace task_monitor
 
         private static int IntervalToIndex(int ms) => ms <= 500 ? 0 : ms >= 2000 ? 2 : 1;
         private static int IndexToInterval(int index) => index == 0 ? 500 : index == 2 ? 2000 : 1000;
+        private static int BatteryIntervalToIndex(int ms)
+            => ms == 250 ? 0 : ms == 1000 ? 2 : ms == 2000 ? 3 : 1;
+        private static int IndexToBatteryInterval(int index)
+            => index == 0 ? 250 : index == 1 ? 500 : index == 2 ? 1000 : 2000;
 
         /// <summary>App pushes the real task state back after a failed schtasks call,
         /// without re-firing the change callback.</summary>
@@ -858,6 +866,12 @@ namespace task_monitor
         {
             if (!_loaded) return;
             _intervalChanged?.Invoke(IndexToInterval(IntervalCombo.SelectedIndex));
+        }
+
+        private void BatteryIntervalCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!_loaded) return;
+            _batteryPollIntervalChanged?.Invoke(IndexToBatteryInterval(BatteryIntervalCombo.SelectedIndex));
         }
 
         // 检查更新 toggle: reports immediately (persisted for the NEXT startup's check)
