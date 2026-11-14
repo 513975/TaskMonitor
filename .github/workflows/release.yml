@@ -72,6 +72,7 @@ jobs:
         run: gh release create $env:GITHUB_REF_NAME $env:ASSET_NAME --title $env:GITHUB_REF_NAME --notes-file release-notes.md
 
       - name: Publish Release to CNB
+        if: github.repository == 'linesoft2/TaskMonitor'
         shell: pwsh
         env:
           CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
